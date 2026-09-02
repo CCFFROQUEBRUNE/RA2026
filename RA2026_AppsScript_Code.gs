@@ -1,0 +1,1015 @@
+// ============================================================
+// ROC D'AZUR 2026 — Apps Script
+// Fichier : Code.gs
+// Déploiement : Web App — "Tout le monde" — "Exécuter en tant que : Moi"
+// ============================================================
+
+// ── ID du Google Sheets (à remplacer après import) ────────────────────────────
+const SHEET_ID = '1ToAbW8QBELe_kXOpOS4ShrCrZgkum2Lw3remQyMUoVQ';
+
+// ── Noms des onglets (doivent correspondre exactement) ────────────────────────
+const TAB = {
+  BENEVOLES  : 'REF_Benevoles',
+  SECTEURS   : 'REF_Secteurs',
+  PS         : 'REF_PS',
+  VEHICULES  : 'REF_Vehicules',
+  COURSES    : 'REF_Courses',
+  REFERENTS  : 'REF_Referents',
+  SAISIE     : 'SAISIE',
+  COMM       : 'SAISIE_COMM',
+  CONFIG     : 'CONFIG',
+  REF_CONFIG : 'REF_CONFIG',  // sécurité PIN
+};
+
+// ── Valeurs par défaut (utilisées si onglet CONFIG absent) ───────────────────
+const CONFIG_DEFAULTS = {
+  NB_VEHICULES: 25,
+  MAX_COM:      20,
+  MAX_CRS:      15,
+  MAX_CMV:      10,
+};
+
+// ── Lecture CONFIG depuis Sheets ──────────────────────────────────────────────
+function getConfig() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const ws = ss.getSheetByName(TAB.CONFIG);
+    if (!ws) return CONFIG_DEFAULTS;
+    const data = ws.getDataRange().getValues();
+    const cfg  = Object.assign({}, CONFIG_DEFAULTS);
+    data.forEach(row => {
+      if (row[0] && row[1] !== '') cfg[String(row[0]).trim()] = Number(row[1]);
+    });
+    return cfg;
+  } catch(e) {
+    return CONFIG_DEFAULTS;
+  }
+}
+
+// ── Maxima radios (A5) — chargé dynamiquement depuis CONFIG ──────────────────
+const RADIO_MAX = { com: 20, crs: 15, cmv: 10 }; // valeurs par défaut, écrasées par CONFIG
+
+// ── Response helpers ──────────────────────────────────────────────────────────
+function jsonOk(data, callback) {
+  const json = JSON.stringify({ ok: true, data });
+  const out  = callback
+    ? ContentService.createTextOutput(`${callback}(${json})`).setMimeType(ContentService.MimeType.JAVASCRIPT)
+    : ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+  return out;
+}
+
+function jsonErr(msg, callback) {
+  const json = JSON.stringify({ ok: false, error: msg });
+  const out  = callback
+    ? ContentService.createTextOutput(`${callback}(${json})`).setMimeType(ContentService.MimeType.JAVASCRIPT)
+    : ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+  return out;
+}
+
+// ============================================================
+// ROUTER PRINCIPAL
+// ============================================================
+
+function doGet(e) {
+  const action   = e.parameter.action || '';
+  const callback = e.parameter.callback || null;
+  try {
+    switch (action) {
+      case 'getReferentiels': return getReferentiels(e.parameter.jour, callback);
+      case 'getConfig':       return getConfigAction(callback);
+      case 'saveConfig':
+        return saveConfigAction(JSON.parse(e.parameter.data || '{}'), callback);
+      case 'getSaisie':       return getSaisie(e.parameter.jour, callback);
+      case 'getCommentaires': return getCommentaires(e.parameter.jour, callback);
+      case 'getFichePS':      return getFichePS(e.parameter.ps, e.parameter.jour, callback, e.parameter.source || 'ts');
+      case 'saveSaisie':
+        return saveSaisie({
+          jour: e.parameter.jour,
+          secteurs: JSON.parse(e.parameter.data || '[]'),
+        }, callback);
+      case 'saveCommentaires':
+        return saveCommentaires({
+          jour: e.parameter.jour,
+          secteur: e.parameter.secteur,
+          commentaires: JSON.parse(e.parameter.data || '[]'),
+        }, callback);
+      case 'importBenevoles':
+        return importBenevoles(JSON.parse(e.parameter.data || '[]'), callback);
+      case 'getSaisieGaillarde':
+        return getSaisieGaillarde(e.parameter.jour, callback);
+      case 'saveSaisieGaillarde':
+        return saveSaisieGaillarde({
+          jour: e.parameter.jour,
+          rows: JSON.parse(e.parameter.data || '[]'),
+        }, callback);
+      case 'getFicheParNom':
+        return getFicheParNom(e.parameter.nom, e.parameter.jour, callback, e.parameter.source || 'ts');
+      case 'savePin':
+        return savePin(e.parameter.pin, callback);
+      case 'verifyPin':
+        return verifyPin(e.parameter.pin, callback);
+      default: return jsonErr('Action inconnue : ' + action, callback);
+    }
+  } catch(err) {
+    return jsonErr('Erreur serveur : ' + err.message, callback);
+  }
+}
+
+function doPost(e) {
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    const action  = payload.action || '';
+    switch (action) {
+      case 'saveSaisie':       return saveSaisie(payload);
+      case 'saveCommentaires': return saveCommentaires(payload);
+      default:                 return jsonErr('Action inconnue : ' + action, callback);
+    }
+  } catch(err) {
+    return jsonErr('Erreur serveur : ' + err.message, callback);
+  }
+}
+
+// ============================================================
+// HELPERS SHEETS
+// ============================================================
+
+function getSheet(tabName) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ws = ss.getSheetByName(tabName);
+  if (!ws) throw new Error('Onglet introuvable : ' + tabName);
+  return ws;
+}
+
+// Lit une feuille depuis la ligne 3 (ligne 1=titre, ligne 2=headers)
+// Retourne un tableau d'objets {col1: val, col2: val, ...}
+function sheetToObjects(tabName, headerRow) {
+  const ws   = getSheet(tabName);
+  const data = ws.getDataRange().getValues();
+  const headers = data[headerRow - 1].map(h => String(h).trim());
+  const rows    = [];
+  for (let i = headerRow; i < data.length; i++) {
+    const row = data[i];
+    if (row.every(c => c === '' || c === null)) continue; // ligne vide
+    const obj = {};
+    headers.forEach((h, j) => { if (h) obj[h] = row[j]; });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+// ============================================================
+// GET — Référentiels (chargement initial de la page saisie)
+// ============================================================
+
+function getReferentiels(jour, callback) {
+  // Charger la config depuis Sheets
+  const cfg = getConfig();
+  const radioMax = { com: cfg.MAX_COM, crs: cfg.MAX_CRS, cmv: cfg.MAX_CMV };
+
+  const JOURS_VALIDES = ['J1','J2','J3','J4','J5'];
+  const jourValide = jour && JOURS_VALIDES.includes(jour) ? jour : null;
+
+  const allBenevoles = sheetToObjects(TAB.BENEVOLES, 2).filter(r => r['NOM']);
+
+  // Colonnes REF_Benevoles : ID_BENEVOLE, NOM, PRENOM, TELEPHONE, ACTIF, REFERENT, J1→J5
+
+  // Trouver la vraie clé de colonne pour ce jour (ex: "J1 MER 7/10" au lieu de "J1")
+  function findJourKey(row, jourCode) {
+    return Object.keys(row).find(k => k.startsWith(jourCode)) || jourCode;
+  }
+
+  const jourKeyBen = jourValide && allBenevoles.length > 0
+    ? findJourKey(allBenevoles[0], jourValide) : jourValide;
+
+  // Détection : les colonnes Jx sont-elles remplies ?
+  const colonneJxRemplies = jourValide &&
+    allBenevoles.some(r => {
+      const v = r[jourKeyBen];
+      return v === 1 || v === '1' || v === true;
+    });
+
+  const benevoles = allBenevoles
+    .filter(r => {
+      if (!colonneJxRemplies) return true;
+      const v = r[jourKeyBen];
+      return v === 1 || v === '1' || v === true;
+    })
+    .map(r => ({
+      id:     r['ID_BENEVOLE'],
+      nom:    (r['NOM'] + (r['PRENOM'] ? ' ' + r['PRENOM'] : '')).trim(),
+      nomSeul: r['NOM'],
+      tel:    r['TELEPHONE'] || ''
+    }));
+
+  const secteurs = sheetToObjects(TAB.SECTEURS, 2)
+    .filter(r => r['NOM_SECTEUR'])
+    .map(r => ({
+      nom:      r['NOM_SECTEUR'],
+      referant: r['REFERANT'],
+      tel:      r['TEL_REFERANT'],
+      hmep:     r['HMEP_SECTEUR'],
+    }));
+
+  const allPS = sheetToObjects(TAB.PS, 2)
+    .filter(r => r['NUM_PS'] && (r['LIEU_DIT'] || r['SECTEUR']));
+
+  const jourKeyPS = jourValide && allPS.length > 0
+    ? findJourKey(allPS[0], jourValide) : jourValide;
+
+  const colonneJxPSRemplies = jourValide &&
+    allPS.some(r => {
+      const v = r[jourKeyPS];
+      return v === 1 || v === '1' || v === true;
+    });
+
+  const ps = allPS
+    .filter(r => {
+      if (!colonneJxPSRemplies) return true;
+      const v = r[jourKeyPS];
+      return v === 1 || v === '1' || v === true;
+    })
+    .map(r => ({
+      num:       String(r['NUM_PS']),
+      lieudit:   r['LIEU_DIT'],
+      secteur:   r['SECTEUR'],
+      kmRavit:   r['KM_RAVIT']   || '',
+      kmAtelier: r['KM_ATELIER'] || '',
+    }));
+
+  const vehicules = sheetToObjects(TAB.VEHICULES, 2)
+    .filter(r => r['NOM_VEHICULE'])
+    .map(r => ({ id: r['ID_VEH'], nom: r['NOM_VEHICULE'], type: r['TYPE'] }));
+
+  const courses = sheetToObjects(TAB.COURSES, 2)
+    .filter(r => r['NOM_COURSE'] && !String(r['NOM_COURSE']).includes('compléter'))
+    .map(r => ({
+      id:      r['ID_COURSE'],
+      nom:     r['NOM_COURSE'],
+      jours:   ['J1','J2','J3','J4','J5'].filter(j => r[j] && r[j] !== ''),
+      ps:      String(r['PS_CONCERNES'] || '').split(',').map(s => parseInt(s.trim())).filter(Boolean),
+      couleur: r['COULEUR'] || '#8B5CF6',
+    }));
+
+  // Référants : lus depuis la colonne REFERENT de REF_Benevoles
+  // Si la colonne REFERENT n'existe pas → fallback sur REF_Referents → fallback sur tous bénévoles
+  let referants = [];
+
+  // Tentative 1 : colonne REFERENT dans REF_Benevoles (Option B)
+  const refDepuisBenevoles = allBenevoles.filter(r => {
+    const v = String(r['REFERENT'] || '').trim().toUpperCase();
+    return v === 'X' || v === 'OUI' || v === '1';
+  });
+
+  if (refDepuisBenevoles.length > 0) {
+    // Colonne REFERENT présente et remplie → on l'utilise
+    referants = refDepuisBenevoles.map(r => ({
+      nom: (r['NOM'] + (r['PRENOM'] ? ' ' + r['PRENOM'] : '')).trim(),
+      tel: r['TELEPHONE'] || ''
+    }));
+  } else {
+    // Tentative 2 : onglet REF_Referents (ancienne méthode)
+    try {
+      const fromSheet = sheetToObjects(TAB.REFERENTS, 2).filter(r => r['NOM']);
+      if (fromSheet.length > 0) {
+        referants = fromSheet.map(r => ({
+          nom: (r['NOM'] + (r['PRENOM'] ? ' ' + r['PRENOM'] : '')).trim(),
+          tel: r['TELEPHONE'] || ''
+        }));
+      }
+    } catch(e) {}
+
+    // Tentative 3 : fallback tous bénévoles
+    if (referants.length === 0) {
+      referants = benevoles.map(b => ({ nom: b.nom, tel: b.tel }));
+    }
+  }
+
+  return jsonOk({ benevoles, secteurs, ps, vehicules, courses, referants, radioMax, config: cfg }, callback);
+}
+
+// ============================================================
+// GET — Saisie d'un jour (lecture pour pré-remplissage)
+// ============================================================
+
+function getSaisie(jour, callback) {
+  if (!jour) return jsonErr('Paramètre jour manquant', callback);
+  const rows = sheetToObjects(TAB.SAISIE, 2).filter(r => r['JOUR'] === jour);
+
+  // Regroupe par secteur
+  const secteursMap = {};
+  rows.forEach(r => {
+    const key = r['SECTEUR'];
+    if (!secteursMap[key]) {
+      secteursMap[key] = {
+        secteur:  r['SECTEUR'],
+        referant: r['REFERANT'],
+        hmepSect: r['HMEP_SECT'],
+        rows:     [],
+      };
+    }
+    secteursMap[key].rows.push({
+      ps:    r['LIEU_DIT_PS'],
+      hmep:  r['HMEP_SITE'],
+      vehA:  r['VEH_A'],
+      vehB:  r['VEH_B'],
+      b1:    r['BENEVOLE_1'],
+      b2:    r['BENEVOLE_2'],
+      b3:    r['BENEVOLE_3'],
+      b4:    r['BENEVOLE_4'],
+      b5:    r['BENEVOLE_5'],
+      com:   Number(r['NB_COM'])  || 0,
+      crs:   Number(r['NB_CRS'])  || 0,
+      cmv:   Number(r['NB_CMV'])  || 0,
+      obs:   r['OBSERVATIONS'],
+    });
+  });
+
+  return jsonOk(Object.values(secteursMap), callback);
+}
+
+// ============================================================
+// GET — Commentaires d'un jour
+// ============================================================
+
+function getCommentaires(jour, callback) {
+  if (!jour) return jsonErr('Paramètre jour manquant', callback);
+  const rows = sheetToObjects(TAB.COMM, 2).filter(r => r['JOUR'] === jour);
+  const result = {};
+  rows.forEach(r => {
+    result[r['SECTEUR']] = [
+      r['COMM_1'] || '',
+      r['COMM_2'] || '',
+      r['COMM_3'] || '',
+    ];
+  });
+  return jsonOk(result, callback);
+}
+
+// ============================================================
+// GET — Fiche PS (pour la fiche bénévole mobile)
+// ============================================================
+
+// ── Helper : construit la fiche depuis une ligne SAISIE (Tous Secteurs) ───────
+function buildFicheTS(found, rows, jour, psNum) {
+  const secteurs = sheetToObjects(TAB.SECTEURS, 2);
+  const sectObj  = secteurs.find(s => s['NOM_SECTEUR'] === found['SECTEUR']);
+
+  let telReferant = '';
+  try {
+    const referents = sheetToObjects(TAB.REFERENTS, 2);
+    const refObj = referents.find(r => r['NOM'] === found['REFERANT']);
+    if (refObj) telReferant = String(refObj['TELEPHONE'] || '');
+  } catch(e) {}
+  if (!telReferant && sectObj) telReferant = String(sectObj['TEL_REFERANT'] || '');
+
+  const coequipiers = rows
+    .filter(r => r['SECTEUR'] === found['SECTEUR'] && r['LIEU_DIT_PS'] !== found['LIEU_DIT_PS'])
+    .filter(r => r['BENEVOLE_1'] || r['BENEVOLE_2'] || r['BENEVOLE_3'])
+    .map(r => ({ ps: r['LIEU_DIT_PS'], benevoles: [r['BENEVOLE_1'],r['BENEVOLE_2'],r['BENEVOLE_3']].filter(Boolean) }));
+
+  const comms = sheetToObjects(TAB.COMM, 2)
+    .find(r => r['JOUR'] === jour && r['SECTEUR'] === found['SECTEUR']);
+  const commentaires = comms
+    ? [comms['COMM_1']||'', comms['COMM_2']||'', comms['COMM_3']||''].filter(Boolean) : [];
+
+  const allCourses = sheetToObjects(TAB.COURSES, 2)
+    .filter(r => r['NOM_COURSE'] && !String(r['NOM_COURSE']).includes('compléter'));
+  const courses = allCourses
+    .filter(r => String(r['PS_CONCERNES']||'').split(',').map(s=>parseInt(s.trim())).includes(psNum))
+    .map(r => ({ nom: r['NOM_COURSE'], jours: ['J1','J2','J3','J4','J5'].filter(j=>r[j]&&r[j]!==''), couleur: r['COULEUR']||'#8B5CF6' }));
+
+  let telB1 = '';
+  const b1Nom = found['BENEVOLE_1'];
+  if (b1Nom) {
+    try {
+      const b1Trim = String(b1Nom).trim();
+      const benData = sheetToObjects(TAB.BENEVOLES, 2).find(r => {
+        const nom = String(r['NOM']||'').trim();
+        const prenom = String(r['PRENOM']||'').trim();
+        return (prenom ? nom+' '+prenom : nom) === b1Trim || nom === b1Trim;
+      });
+      if (benData) telB1 = String(benData['TELEPHONE'] || '');
+    } catch(e) {}
+  }
+
+  return {
+    secteur:     found['SECTEUR'],
+    referant:    found['REFERANT'],
+    telReferant, telB1,
+    hmepSect:    found['HMEP_SECT'],
+    ps:          found['LIEU_DIT_PS'],
+    hmep:        found['HMEP_SITE'],
+    vehA:        found['VEH_A'],
+    vehB:        found['VEH_B'],
+    benevoles:   [found['BENEVOLE_1'],found['BENEVOLE_2'],found['BENEVOLE_3'],found['BENEVOLE_4'],found['BENEVOLE_5']].filter(Boolean),
+    com:         Number(found['NB_COM'])  || 0,
+    crs:         Number(found['NB_CRS'])  || 0,
+    cmv:         Number(found['NB_CMV'])  || 0,
+    obs:         found['OBSERVATIONS'] || '',
+    coequipiers, commentaires, courses,
+  };
+}
+
+// ── Helper : construit la fiche depuis une ligne SAISIE_GAILLARDE ─────────────
+function buildFicheLG(obj) {
+  const telRef = (() => {
+    try {
+      const b1 = String(obj['REFERENT'] || '').trim();
+      const b1Seul = b1.split(' ')[0];
+      const ben = sheetToObjects(TAB.BENEVOLES, 2).find(r =>
+        (String(r['NOM']||'').trim()+' '+String(r['PRENOM']||'').trim()).trim() === b1 ||
+        String(r['NOM']||'').trim() === b1Seul
+      );
+      return ben ? String(ben['TELEPHONE'] || '') : '';
+    } catch(e) { return ''; }
+  })();
+  return {
+    secteur:     'LA_GAILLARDE',
+    referant:    obj['MEP_PAR'] || '',
+    telReferant: telRef,
+    telB1:       telRef,
+    hmepSect:    obj['HMEP'] || '',
+    ps:          obj['NUM_PS'] + (obj['LIEU_DIT'] ? ' - ' + obj['LIEU_DIT'] : ''),
+    hmep:        obj['HMEP_RDV'] || obj['HMEP'] || '',
+    vehA:        obj['VEH_A'] || '',
+    vehB:        obj['VEH_B'] || '',
+    benevoles:   [obj['REFERENT'],obj['ACC_1'],obj['ACC_2'],obj['ACC_3']].filter(Boolean),
+    com:         Number(obj['NB_COM']) || 0,
+    crs:         Number(obj['NB_CRS']) || 0,
+    cmv:         Number(obj['NB_CMV']) || 0,
+    obs:         '',
+    coequipiers: [],
+    commentaires:[obj['COMM_A']||'', obj['COMM_B']||''].filter(Boolean),
+    courses:     [],
+    kmRavit:     obj['KM_RAVIT'] || '',
+    kmAtelier:   obj['KM_ATELIER'] || '',
+  };
+}
+
+function getFichePS(psNumStr, jour, callback, source) {
+  if (!psNumStr || !jour) return jsonErr('Paramètres ps et jour requis', callback);
+  const psNum = parseInt(psNumStr);
+  // source = 'lg' → chercher uniquement dans SAISIE_GAILLARDE
+  // source = 'ts' ou absent → chercher uniquement dans SAISIE (Tous Secteurs)
+  const searchLG = (source === 'lg');
+
+  if (!searchLG) {
+    // ── SAISIE Tous Secteurs ──────────────────────────────────────────────────
+    const rows = sheetToObjects(TAB.SAISIE, 2).filter(r => r['JOUR'] === jour);
+    let found = null;
+    for (const r of rows) {
+      const nums = String(r['NUM_PS'] || '').match(/\d+/g)?.map(Number) || [];
+      if (nums.includes(psNum)) { found = r; break; }
+    }
+    if (!found) return jsonOk(null, callback);
+    return jsonOk(buildFicheTS(found, rows, jour, psNum), callback);
+
+  } else {
+    // ── SAISIE_GAILLARDE ─────────────────────────────────────────────────────
+    try {
+      const ws = getGaillardeSheet();
+      const data = ws.getDataRange().getValues();
+      if (data.length >= 2) {
+        const headers = data[0].map(h => String(h).trim());
+        for (let i = 1; i < data.length; i++) {
+          const row = data[i];
+          if (String(row[0]).trim() !== jour) continue;
+          const obj = {};
+          headers.forEach((h, j) => { obj[h] = row[j]; });
+          const rowPS = parseInt(String(obj['NUM_PS'] || '').match(/\d+/)?.[0] || '0');
+          if (rowPS === psNum) return jsonOk(buildFicheLG(obj), callback);
+        }
+      }
+    } catch(e) { Logger.log('getFichePS LG err: ' + e.message); }
+    return jsonOk(null, callback);
+  }
+}
+
+// ============================================================
+// POST — Sauvegarde saisie (upsert ligne par ligne JOUR+NUM_PS)
+// ============================================================
+
+// ── Helper : extrait le NOM seul (premier mot) depuis "NOM PRENOM" ou "NOM" ──
+// Garantit que BENEVOLE_x dans SAISIE ne stocke que le NOM, quelle que soit
+// la valeur reçue du front (b.nom = "Bénévole_003 Corinne" ou "Bénévole_003").
+function nomSeul(val) {
+  if (!val) return '';
+  return String(val).trim().split(/\s+/)[0];
+}
+
+function saveSaisie(payload, callback) {
+  const { jour, secteurs } = payload;
+  if (!jour || !secteurs) return jsonErr('Données incomplètes', callback);
+
+  const ws      = getSheet(TAB.SAISIE);
+  const data    = ws.getDataRange().getValues();
+  const headers = data[1]; // ligne 2 = headers (index 1)
+
+  const col = {};
+  headers.forEach((h, i) => { col[String(h).trim()] = i; });
+
+  const now = Utilities.formatDate(new Date(), 'Europe/Paris', 'yyyy-MM-dd HH:mm');
+
+  // Construire les nouvelles lignes depuis le payload
+  // BENEVOLE_x : on ne stocke que le NOM (premier mot) pour cohérence avec
+  // les anciens enregistrements et pour que getFichePS / telB1 fonctionnent.
+  const newLines = [];
+  secteurs.forEach(s => {
+    s.rows.forEach(r => {
+      if (!r.ps) return;
+      const nums = String(r.ps).match(/\d+/g) || ['0'];
+      const line = new Array(headers.length).fill('');
+      line[col['JOUR']]         = jour;
+      line[col['SECTEUR']]      = s.secteur;
+      line[col['REFERANT']]     = s.referant;
+      line[col['HMEP_SECT']]    = s.hmepSect;
+      line[col['NUM_PS']]       = nums[0];
+      line[col['LIEU_DIT_PS']]  = r.ps;
+      line[col['HMEP_SITE']]    = r.hmep;
+      line[col['VEH_A']]        = r.vehA;
+      line[col['VEH_B']]        = r.vehB;
+      line[col['BENEVOLE_1']]   = nomSeul(r.b1);  // NOM seul — ex: "Bénévole_003"
+      line[col['BENEVOLE_2']]   = nomSeul(r.b2);
+      line[col['BENEVOLE_3']]   = nomSeul(r.b3);
+      line[col['BENEVOLE_4']]   = nomSeul(r.b4);
+      line[col['BENEVOLE_5']]   = nomSeul(r.b5);
+      line[col['NB_COM']]       = r.com || 0;
+      line[col['NB_CRS']]       = r.crs || 0;
+      line[col['NB_CMV']]       = r.cmv || 0;
+      line[col['OBSERVATIONS']] = r.obs || '';
+      line[col['TIMESTAMP']]    = now;
+      newLines.push(line);
+    });
+  });
+
+  // Identifier les secteurs envoyés dans ce payload
+  const secteursConcernes = new Set(secteurs.map(s => s.secteur));
+
+  // Supprimer toutes les lignes du jour dans Sheets (en sens inverse pour éviter le décalage)
+  // On relit les données fraîches du sheet
+  const dataFresh = ws.getDataRange().getValues();
+  const colFresh  = {};
+  dataFresh[1].forEach((h, i) => { colFresh[String(h).trim()] = i; });
+
+  for (let i = dataFresh.length - 1; i >= 2; i--) {
+    const rowJour = String(dataFresh[i][colFresh['JOUR']] || '').trim();
+    if (rowJour === jour) {
+      ws.deleteRow(i + 1); // +1 car Sheets est 1-based
+    }
+  }
+
+  // Réécrire les nouvelles lignes
+  if (newLines.length > 0) {
+    ws.getRange(ws.getLastRow() + 1, 1, newLines.length, newLines[0].length)
+      .setValues(newLines);
+  }
+
+  return jsonOk({ updated: 0, inserted: newLines.length }, callback);
+}
+
+// ============================================================
+// POST — Sauvegarde commentaires secteur
+// ============================================================
+
+function saveCommentaires(payload, callback) {
+  const { jour, secteur, commentaires } = payload;
+  if (!jour || !secteur) return jsonErr('Données incomplètes', callback);
+
+  const ws      = getSheet(TAB.COMM);
+  const data    = ws.getDataRange().getValues();
+  const headers = data[1];
+  const col     = {};
+  headers.forEach((h, i) => { col[String(h).trim()] = i; });
+
+  const now = Utilities.formatDate(new Date(), 'Europe/Paris', 'yyyy-MM-dd HH:mm');
+
+  // Cherche ligne existante JOUR + SECTEUR
+  let foundRow = -1;
+  for (let i = 2; i < data.length; i++) {
+    if (String(data[i][col['JOUR']]).trim()    === jour &&
+        String(data[i][col['SECTEUR']]).trim() === secteur) {
+      foundRow = i + 1; break;
+    }
+  }
+
+  const line = new Array(headers.length).fill('');
+  line[col['JOUR']]      = jour;
+  line[col['SECTEUR']]   = secteur;
+  line[col['COMM_1']]    = commentaires[0] || '';
+  line[col['COMM_2']]    = commentaires[1] || '';
+  line[col['COMM_3']]    = commentaires[2] || '';
+  line[col['TIMESTAMP']] = now;
+
+  if (foundRow > 0) {
+    ws.getRange(foundRow, 1, 1, line.length).setValues([line]);
+  } else {
+    ws.getRange(ws.getLastRow() + 1, 1, 1, line.length).setValues([line]);
+  }
+
+  return jsonOk({ action: foundRow > 0 ? 'updated' : 'inserted' }, callback);
+}
+
+// ============================================================
+// TEST — Fonctions de test locales (exécuter dans l'éditeur)
+// Note : on appelle la logique métier directement, sans le
+//        wrapper HTTP (ContentService ne fonctionne pas en local)
+// ============================================================
+
+function testGetReferentiels() {
+  const ss        = SpreadsheetApp.openById(SHEET_ID);
+  const benevoles = sheetToObjects(TAB.BENEVOLES, 2).filter(r => r['NOM']);
+  const secteurs  = sheetToObjects(TAB.SECTEURS,  2).filter(r => r['NOM_SECTEUR']);
+  const ps        = sheetToObjects(TAB.PS,        2).filter(r => r['NUM_PS']);
+  const vehicules = sheetToObjects(TAB.VEHICULES, 2).filter(r => r['NOM_VEHICULE']);
+  const courses   = sheetToObjects(TAB.COURSES,   2).filter(r => r['NOM_COURSE'] && !String(r['NOM_COURSE']).includes('compléter'));
+
+  Logger.log('✓ Bénévoles : ' + benevoles.length);
+  Logger.log('✓ Secteurs  : ' + secteurs.length);
+  Logger.log('✓ PS        : ' + ps.length);
+  Logger.log('✓ Véhicules : ' + vehicules.length);
+  Logger.log('✓ Courses   : ' + courses.length);
+  Logger.log('--- Premier bénévole : ' + JSON.stringify(benevoles[0]));
+  Logger.log('--- Premier secteur  : ' + JSON.stringify(secteurs[0]));
+}
+
+function testGetFichePS() {
+  // Teste la récupération du PS 33 en J1
+  const rows = sheetToObjects(TAB.SAISIE, 2).filter(r => r['JOUR'] === 'J1');
+  Logger.log('Lignes J1 dans SAISIE : ' + rows.length);
+  const found = rows.find(r => {
+    const nums = String(r['NUM_PS'] || '').match(/\d+/g)?.map(Number) || [];
+    return nums.includes(33);
+  });
+  if (found) {
+    Logger.log('✓ PS 33 trouvé : ' + JSON.stringify(found));
+  } else {
+    Logger.log('⚠ PS 33 non trouvé en J1 — vérifier onglet SAISIE');
+  }
+}
+
+function testSaveSaisie() {
+  const payload = {
+    action: 'saveSaisie',
+    jour: 'J1',
+    secteurs: [{
+      secteur: 'LA_GAILLARDE', referant: 'Référant_01', hmepSect: '6h00',
+      rows: [
+        { ps:'33 - Impasse des Celtes', hmep:'6h30', vehA:'MITSU', vehB:'',
+          b1:'Bénévole_006', b2:'Bénévole_007', b3:'', b4:'', b5:'',
+          com:4, crs:1, cmv:1, obs:'Test depuis Apps Script' }
+      ]
+    }]
+  };
+  const result = JSON.parse(saveSaisie(payload).getContent());
+  Logger.log('✓ saveSaisie : ' + JSON.stringify(result));
+}
+
+// ============================================================
+// IMPORT BENEVOLES — depuis admin.html (xlsx → Sheets)
+// Met à jour uniquement les colonnes J1→J5 dans REF_Benevoles
+// Identification par NOM (correspondance exacte)
+// ============================================================
+function importBenevoles(batch, callback) {
+  if (!batch || !batch.length) return jsonErr('Données vides', callback);
+
+  const ws      = getSheet(TAB.BENEVOLES);
+  const data    = ws.getDataRange().getValues();
+  const headers = data[1].map(h => String(h).trim()); // ligne 2 = headers
+
+  // Trouver les indices des colonnes Jx dans Sheets
+  // Les headers sont du type "J1 MER 7/10", on cherche ceux qui commencent par J1..J5
+  const JX_CODES = ['J1','J2','J3','J4','J5'];
+  const jxColIdx = JX_CODES.map(jx =>
+    headers.findIndex(h => h.startsWith(jx))
+  );
+
+  // Index de la colonne NOM
+  const nomIdx = headers.indexOf('NOM');
+  if (nomIdx === -1) return jsonErr('Colonne NOM introuvable dans REF_Benevoles', callback);
+
+  let updated = 0;
+
+  batch.forEach(b => {
+    // Chercher par NOM (colonne B)
+    for (let r = 2; r < data.length; r++) {
+      const cellNom = String(data[r][nomIdx] || '').trim();
+      if (cellNom === (b.nomSeul || b.nom.split(' ')[0])) {
+        // Mettre à jour les colonnes Jx
+        JX_CODES.forEach((jx, i) => {
+          const colIdx = jxColIdx[i];
+          if (colIdx !== -1) {
+            ws.getRange(r + 1, colIdx + 1).setValue(b.jx[i] === 1 ? 1 : '');
+          }
+        });
+        updated++;
+        break;
+      }
+    }
+  });
+
+  return jsonOk({ updated, total: batch.length }, callback);
+}
+
+// ============================================================
+// CONFIG — Lecture et écriture des paramètres de l'événement
+// ============================================================
+
+function getConfigAction(callback) {
+  return jsonOk(getConfig(), callback);
+}
+
+function saveConfigAction(data, callback) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let ws = ss.getSheetByName(TAB.CONFIG);
+
+    // Créer l'onglet CONFIG s'il n'existe pas
+    if (!ws) {
+      ws = ss.insertSheet(TAB.CONFIG);
+      ws.getRange(1, 1).setValue('PARAM');
+      ws.getRange(1, 2).setValue('VALEUR');
+      ws.getRange(1, 3).setValue('DESCRIPTION');
+    }
+
+    // Écrire les valeurs (upsert par clé PARAM)
+    const existing = ws.getDataRange().getValues();
+    const paramCol = {}; // PARAM → rowIndex
+    existing.forEach((row, i) => {
+      if (i === 0) return; // skip header
+      if (row[0]) paramCol[String(row[0]).trim()] = i + 1;
+    });
+
+    const descriptions = {
+      NB_VEHICULES: 'Nombre maximum de véhicules disponibles',
+      MAX_COM:      'Nombre maximum de radios COM',
+      MAX_CRS:      'Nombre maximum de radios CRS (Courses)',
+      MAX_CMV:      'Nombre maximum de radios CMV (Com Véhicule)',
+    };
+
+    let updated = 0;
+    Object.entries(data).forEach(([key, val]) => {
+      const rowIdx = paramCol[key];
+      if (rowIdx) {
+        ws.getRange(rowIdx, 2).setValue(Number(val));
+      } else {
+        // Nouvelle ligne
+        const nextRow = ws.getLastRow() + 1;
+        ws.getRange(nextRow, 1).setValue(key);
+        ws.getRange(nextRow, 2).setValue(Number(val));
+        ws.getRange(nextRow, 3).setValue(descriptions[key] || '');
+      }
+      updated++;
+    });
+
+    return jsonOk({ updated, config: getConfig() }, callback);
+  } catch(e) {
+    return jsonErr('Erreur saveConfig : ' + e.message, callback);
+  }
+}
+
+// ============================================================
+// SAISIE_GAILLARDE — Onglet dédié PS individuels
+// ============================================================
+
+// Colonnes SAISIE_GAILLARDE
+// JOUR | NUM_PS | LIEU_DIT | REFERENT | ACC_1 | ACC_2 | ACC_3 |
+// VEH_A | VEH_B | NB_COM | NB_CRS | NB_CMV |
+// MEP_PAR | MEP_LIEU | HMEP | KM_RAVIT | KM_ATELIER |
+// COURSE_1 | COURSE_2 | COURSE_3 | COURSE_4 |
+// PREMIER_PART | COMM_A | COMM_B | COMM_C | TIMESTAMP
+
+const GAILLARDE_HEADERS = [
+  'JOUR','NUM_PS','LIEU_DIT','REFERENT','ACC_1','ACC_2','ACC_3',
+  'VEH_A','VEH_B','NB_COM','NB_CRS','NB_CMV',
+  'MEP_PAR','MEP_LIEU','HMEP','HMEP_RDV','KM_RAVIT','KM_ATELIER',
+  'COURSE_1','COURSE_2','COURSE_3','COURSE_4',
+  'PREMIER_PART','COMM_A','COMM_B','COMM_C','TIMESTAMP'
+];
+
+function getGaillardeSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName('SAISIE_GAILLARDE');
+  if (!ws) {
+    ws = ss.insertSheet('SAISIE_GAILLARDE');
+    ws.getRange(1, 1, 1, GAILLARDE_HEADERS.length).setValues([GAILLARDE_HEADERS]);
+    ws.getRange(1, 1, 1, GAILLARDE_HEADERS.length)
+      .setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
+    ws.setFrozenRows(1);
+  }
+  return ws;
+}
+
+function getSaisieGaillarde(jour, callback) {
+  if (!jour) return jsonErr('Paramètre jour manquant', callback);
+  try {
+    const ws   = getGaillardeSheet();
+    const data = ws.getDataRange().getValues();
+    if (data.length < 2) return jsonOk([], callback);
+    const headers = data[0].map(h => String(h).trim());
+    const rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (String(row[0]).trim() !== jour) continue;
+      if (row.every(c => c === '' || c === null)) continue;
+      const obj = {};
+      headers.forEach((h, j) => { obj[h] = row[j]; });
+      rows.push(obj);
+    }
+    return jsonOk(rows, callback);
+  } catch(e) {
+    return jsonErr('Erreur getSaisieGaillarde : ' + e.message, callback);
+  }
+}
+
+function saveSaisieGaillarde(payload, callback) {
+  const { jour, rows } = payload;
+  if (!jour || !rows) return jsonErr('Données manquantes', callback);
+  try {
+    const ws   = getGaillardeSheet();
+    const data = ws.getDataRange().getValues();
+    const headers = data[0].map(h => String(h).trim());
+
+    // Supprimer les lignes existantes pour ce jour
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === jour) ws.deleteRow(i + 1);
+    }
+
+    // Réécrire toutes les lignes du jour
+    // REFERENT / ACC_x : normaliser en NOM seul pour cohérence avec SAISIE
+    // NUM_PS : la valeur du front est "33 - Impasse des Celtes" (libellé complet du select)
+    //          → on extrait le numéro seul pour NUM_PS et le libellé complet pour LIEU_DIT
+    //          → cohérence avec SAISIE où NUM_PS="33" et LIEU_DIT_PS="33 - Impasse des Celtes"
+    const BENV_COLS_LG = ['REFERENT','ACC_1','ACC_2','ACC_3'];
+    const now = new Date();
+    rows.forEach(r => {
+      // Extraire numéro PS et lieu-dit depuis la valeur brute du select
+      const numPsRaw  = String(r['NUM_PS'] || '').trim();
+      const numPsSeul = (numPsRaw.match(/^\d+/) || [''])[0]; // "33" depuis "33 - Impasse des Celtes"
+      const lieuDit   = numPsRaw.replace(/^\d+\s*-?\s*/, '').trim(); // "Impasse des Celtes"
+
+      const line = GAILLARDE_HEADERS.map(h => {
+        if (h === 'JOUR')      return jour;
+        if (h === 'TIMESTAMP') return now;
+        if (h === 'NUM_PS')    return numPsSeul;   // "33"
+        if (h === 'LIEU_DIT')  return lieuDit;     // "Impasse des Celtes"
+        if (BENV_COLS_LG.includes(h)) return nomSeul(r[h]);
+        return r[h] !== undefined ? r[h] : '';
+      });
+      ws.appendRow(line);
+    });
+
+    return jsonOk({ saved: rows.length }, callback);
+  } catch(e) {
+    return jsonErr('Erreur saveSaisieGaillarde : ' + e.message, callback);
+  }
+}
+
+// ============================================================
+// GET — Fiche par NOM (source = 'ts' → SAISIE uniquement)
+// ============================================================
+function getFicheParNom(nom, jour, callback, source) {
+  if (!nom || !jour) return jsonErr('Paramètres nom et jour requis', callback);
+
+  const nomSearch = String(nom).trim().toLowerCase();
+  const searchLG  = (source === 'lg'); // actuellement non utilisé mais prévu
+  const results   = [];
+
+  // ── Chercher dans SAISIE (Tous Secteurs) — toujours si source=ts ──────────
+  if (!searchLG) {
+    try {
+      const rows = sheetToObjects(TAB.SAISIE, 2).filter(r => r['JOUR'] === jour);
+      rows.forEach(r => {
+        ['BENEVOLE_1','BENEVOLE_2','BENEVOLE_3','BENEVOLE_4','BENEVOLE_5'].forEach(col => {
+          const val = String(r[col] || '').trim();
+          if (!val) return;
+          const valLow = val.toLowerCase();
+          if (valLow.includes(nomSearch)) {
+            const parts  = val.split(' ');
+            const nomB   = parts[0] || val;
+            const prenom = parts.slice(1).join(' ') || '';
+            const key    = val + '|' + r['LIEU_DIT_PS'];
+            if (!results.find(x => x.key === key)) {
+              results.push({
+                key,
+                nomComplet: val,
+                nom:     nomB,
+                prenom:  prenom,
+                ps:      r['NUM_PS'],
+                lieudit: r['LIEU_DIT_PS'],
+                secteur: r['SECTEUR'],
+                source:  'SAISIE',
+              });
+            }
+          }
+        });
+      });
+    } catch(e) { Logger.log('Erreur SAISIE: ' + e.message); }
+  }
+
+  return jsonOk({ results }, callback);
+}
+
+// ============================================================
+// SYSTÈME PIN — Sécurité d'accès (saisie.html / fiche.html)
+// Stockage dans l'onglet REF_CONFIG (CLE | VALEUR)
+// ============================================================
+
+/**
+ * Retourne ou crée l'onglet REF_CONFIG.
+ */
+function _getRefConfigSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(TAB.REF_CONFIG);
+  if (!ws) {
+    ws = ss.insertSheet(TAB.REF_CONFIG);
+    ws.getRange('A1').setValue('CLE');
+    ws.getRange('B1').setValue('VALEUR');
+    ws.getRange(1, 1, 1, 2).setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
+    ws.setFrozenRows(1);
+  }
+  return ws;
+}
+
+/**
+ * Lit une valeur dans REF_CONFIG par clé.
+ * Retourne null si clé absente ou valeur vide.
+ * ⚠ Normalise en string pour éviter bug float (ex: 83520.0 → "83520")
+ */
+function _getRefConfigValue(cle) {
+  const ws   = _getRefConfigSheet();
+  const data = ws.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toUpperCase().trim() === String(cle).toUpperCase().trim()) {
+      const raw = data[i][1];
+      if (raw === null || raw === undefined || raw === '') return null;
+      // Convertir float → int string si applicable (ex: 83520.0 → "83520")
+      const num = Number(raw);
+      if (!isNaN(num) && String(raw).includes('.') && num === Math.floor(num)) {
+        return String(Math.floor(num));
+      }
+      return String(raw).trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Écrit ou met à jour une valeur dans REF_CONFIG (upsert par clé).
+ * Stocke toujours en string pour éviter la conversion float de Sheets.
+ */
+function _setRefConfigValue(cle, valeur) {
+  const ws   = _getRefConfigSheet();
+  const data = ws.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toUpperCase().trim() === String(cle).toUpperCase().trim()) {
+      // Forcer le format texte pour éviter que Sheets convertisse en float
+      ws.getRange(i + 1, 2).setNumberFormat('@').setValue(String(valeur));
+      return;
+    }
+  }
+  const newRow = ws.getLastRow() + 1;
+  ws.getRange(newRow, 1).setValue(cle.toUpperCase());
+  ws.getRange(newRow, 2).setNumberFormat('@').setValue(String(valeur));
+}
+
+/**
+ * savePin(pin, callback) — appelé depuis admin.html
+ * Valide et stocke le PIN dans REF_CONFIG (format texte forcé).
+ */
+function savePin(pin, callback) {
+  try {
+    const p = String(pin || '').trim();
+    if (!/^\d{4,8}$/.test(p)) {
+      return jsonErr('PIN invalide — 4 à 8 chiffres requis', callback);
+    }
+    _setRefConfigValue('PIN', p);
+    return jsonOk({ msg: 'PIN enregistré' }, callback);
+  } catch(e) {
+    return jsonErr('Erreur savePin : ' + e.message, callback);
+  }
+}
+
+/**
+ * verifyPin(pin, callback) — appelé depuis saisie.html et fiche.html
+ * Compare le PIN soumis avec celui stocké dans REF_CONFIG.
+ * ⚠ Normalise les deux côtés en string pour éviter bug float Sheets.
+ * Si aucun PIN configuré → accès libre (libre: true).
+ */
+function verifyPin(pin, callback) {
+  try {
+    const pSaisi = String(pin || '').trim();
+    const pRef   = _getRefConfigValue('PIN');
+
+    if (pRef === null || pRef === '') {
+      // Aucun PIN configuré → accès libre
+      return jsonOk({ libre: true, msg: 'Aucun PIN configuré' }, callback);
+    }
+
+    if (pSaisi === pRef) {
+      return jsonOk({ libre: false, msg: 'PIN correct' }, callback);
+    }
+    return jsonErr('PIN incorrect', callback);
+  } catch(e) {
+    return jsonErr('Erreur verifyPin : ' + e.message, callback);
+  }
+}
