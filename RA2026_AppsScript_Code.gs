@@ -666,48 +666,66 @@ function testSaveSaisie() {
 
 // ============================================================
 // IMPORT BENEVOLES — depuis admin.html (xlsx → Sheets)
-// Met à jour uniquement les colonnes J1→J5 dans REF_Benevoles
-// Identification par NOM (correspondance exacte)
+// - Bénévole trouvé par NOM → mise à jour J1→J5
+// - Bénévole absent         → création automatique de la ligne
 // ============================================================
 function importBenevoles(batch, callback) {
   if (!batch || !batch.length) return jsonErr('Données vides', callback);
 
   const ws      = getSheet(TAB.BENEVOLES);
-  const data    = ws.getDataRange().getValues();
-  const headers = data[1].map(h => String(h).trim()); // ligne 2 = headers
+  let   data    = ws.getDataRange().getValues();
+  const headers = data[1].map(h => String(h).trim());
 
-  // Trouver les indices des colonnes Jx dans Sheets
-  // Les headers sont du type "J1 MER 7/10", on cherche ceux qui commencent par J1..J5
   const JX_CODES = ['J1','J2','J3','J4','J5'];
-  const jxColIdx = JX_CODES.map(jx =>
-    headers.findIndex(h => h.startsWith(jx))
-  );
+  const jxColIdx = JX_CODES.map(jx => headers.findIndex(h => h.startsWith(jx)));
+  const nomIdx    = headers.indexOf('NOM');
+  const prenomIdx = headers.indexOf('PRENOM');
+  const telIdx    = headers.indexOf('TELEPHONE');
+  const actifIdx  = headers.indexOf('ACTIF');
+  const idIdx     = headers.indexOf('ID_BENEVOLE');
+  const nbCols    = headers.length;
 
-  // Index de la colonne NOM
-  const nomIdx = headers.indexOf('NOM');
   if (nomIdx === -1) return jsonErr('Colonne NOM introuvable dans REF_Benevoles', callback);
 
-  let updated = 0;
+  let updated = 0, inserted = 0;
 
   batch.forEach(b => {
-    // Chercher par NOM (colonne B)
+    const nomRecherche = (b.nomSeul || b.nom.split(' ')[0]).trim();
+
+    // Recherche par NOM dans les données actuelles
+    let foundRow = -1;
     for (let r = 2; r < data.length; r++) {
-      const cellNom = String(data[r][nomIdx] || '').trim();
-      if (cellNom === (b.nomSeul || b.nom.split(' ')[0])) {
-        // Mettre à jour les colonnes Jx
-        JX_CODES.forEach((jx, i) => {
-          const colIdx = jxColIdx[i];
-          if (colIdx !== -1) {
-            ws.getRange(r + 1, colIdx + 1).setValue(b.jx[i] === 1 ? 1 : '');
-          }
-        });
-        updated++;
-        break;
-      }
+      if (String(data[r][nomIdx] || '').trim() === nomRecherche) { foundRow = r; break; }
+    }
+
+    if (foundRow !== -1) {
+      // ── Trouvé → mise à jour Jx uniquement ───────────────────
+      JX_CODES.forEach((jx, i) => {
+        const ci = jxColIdx[i];
+        if (ci !== -1) ws.getRange(foundRow + 1, ci + 1).setValue(b.jx[i] === 1 ? 1 : '');
+      });
+      updated++;
+    } else {
+      // ── Absent → création d'une nouvelle ligne ────────────────
+      const nextId = 'BEN' + String(data.length - 1).padStart(3, '0');
+      const newRow = new Array(nbCols).fill('');
+      if (idIdx     !== -1) newRow[idIdx]     = nextId;
+      if (nomIdx    !== -1) newRow[nomIdx]    = nomRecherche;
+      if (prenomIdx !== -1) newRow[prenomIdx] = (b.prenom || '').trim();
+      if (telIdx    !== -1) newRow[telIdx]    = (b.tel    || '').trim();
+      if (actifIdx  !== -1) newRow[actifIdx]  = 'OUI';
+      JX_CODES.forEach((jx, i) => {
+        const ci = jxColIdx[i];
+        if (ci !== -1) newRow[ci] = b.jx[i] === 1 ? 1 : '';
+      });
+      ws.appendRow(newRow);
+      inserted++;
+      // Relire pour que le prochain bénévole voie la nouvelle ligne
+      data = ws.getDataRange().getValues();
     }
   });
 
-  return jsonOk({ updated, total: batch.length }, callback);
+  return jsonOk({ updated, inserted, total: batch.length }, callback);
 }
 
 // ============================================================
@@ -914,9 +932,6 @@ function getFicheParNom(nom, jour, callback, source) {
 // Stockage dans l'onglet REF_CONFIG (CLE | VALEUR)
 // ============================================================
 
-/**
- * Retourne ou crée l'onglet REF_CONFIG.
- */
 function _getRefConfigSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let ws = ss.getSheetByName(TAB.REF_CONFIG);
@@ -924,17 +939,12 @@ function _getRefConfigSheet() {
     ws = ss.insertSheet(TAB.REF_CONFIG);
     ws.getRange('A1').setValue('CLE');
     ws.getRange('B1').setValue('VALEUR');
-    ws.getRange(1, 1, 1, 2).setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
+    ws.getRange(1,1,1,2).setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
     ws.setFrozenRows(1);
   }
   return ws;
 }
 
-/**
- * Lit une valeur dans REF_CONFIG par clé.
- * Retourne null si clé absente ou valeur vide.
- * ⚠ Normalise en string pour éviter bug float (ex: 83520.0 → "83520")
- */
 function _getRefConfigValue(cle) {
   const ws   = _getRefConfigSheet();
   const data = ws.getDataRange().getValues();
@@ -942,7 +952,7 @@ function _getRefConfigValue(cle) {
     if (String(data[i][0]).toUpperCase().trim() === String(cle).toUpperCase().trim()) {
       const raw = data[i][1];
       if (raw === null || raw === undefined || raw === '') return null;
-      // Convertir float → int string si applicable (ex: 83520.0 → "83520")
+      // Correction bug float Sheets : 83520.0 → "83520"
       const num = Number(raw);
       if (!isNaN(num) && String(raw).includes('.') && num === Math.floor(num)) {
         return String(Math.floor(num));
@@ -953,16 +963,11 @@ function _getRefConfigValue(cle) {
   return null;
 }
 
-/**
- * Écrit ou met à jour une valeur dans REF_CONFIG (upsert par clé).
- * Stocke toujours en string pour éviter la conversion float de Sheets.
- */
 function _setRefConfigValue(cle, valeur) {
   const ws   = _getRefConfigSheet();
   const data = ws.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).toUpperCase().trim() === String(cle).toUpperCase().trim()) {
-      // Forcer le format texte pour éviter que Sheets convertisse en float
       ws.getRange(i + 1, 2).setNumberFormat('@').setValue(String(valeur));
       return;
     }
@@ -972,16 +977,10 @@ function _setRefConfigValue(cle, valeur) {
   ws.getRange(newRow, 2).setNumberFormat('@').setValue(String(valeur));
 }
 
-/**
- * savePin(pin, callback) — appelé depuis admin.html
- * Valide et stocke le PIN dans REF_CONFIG (format texte forcé).
- */
 function savePin(pin, callback) {
   try {
     const p = String(pin || '').trim();
-    if (!/^\d{4,8}$/.test(p)) {
-      return jsonErr('PIN invalide — 4 à 8 chiffres requis', callback);
-    }
+    if (!/^\d{4,8}$/.test(p)) return jsonErr('PIN invalide — 4 à 8 chiffres requis', callback);
     _setRefConfigValue('PIN', p);
     return jsonOk({ msg: 'PIN enregistré' }, callback);
   } catch(e) {
@@ -989,25 +988,14 @@ function savePin(pin, callback) {
   }
 }
 
-/**
- * verifyPin(pin, callback) — appelé depuis saisie.html et fiche.html
- * Compare le PIN soumis avec celui stocké dans REF_CONFIG.
- * ⚠ Normalise les deux côtés en string pour éviter bug float Sheets.
- * Si aucun PIN configuré → accès libre (libre: true).
- */
 function verifyPin(pin, callback) {
   try {
     const pSaisi = String(pin || '').trim();
     const pRef   = _getRefConfigValue('PIN');
-
     if (pRef === null || pRef === '') {
-      // Aucun PIN configuré → accès libre
       return jsonOk({ libre: true, msg: 'Aucun PIN configuré' }, callback);
     }
-
-    if (pSaisi === pRef) {
-      return jsonOk({ libre: false, msg: 'PIN correct' }, callback);
-    }
+    if (pSaisi === pRef) return jsonOk({ libre: false, msg: 'PIN correct' }, callback);
     return jsonErr('PIN incorrect', callback);
   } catch(e) {
     return jsonErr('Erreur verifyPin : ' + e.message, callback);
