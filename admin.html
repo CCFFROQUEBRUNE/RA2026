@@ -591,7 +591,8 @@ async function startImport() {
       });
       if (result.ok) {
         ok += result.data.updated || 0;
-        log(`Lot ${Math.floor(i/BATCH)+1} — ${result.data.updated} ligne(s) mises à jour ✓`, 'ok');
+        const ins = result.data.inserted || 0;
+        log(`Lot ${Math.floor(i/BATCH)+1} — ${result.data.updated} mis à jour, ${ins} créé(s) ✓`, 'ok');
       } else {
         err += batch.length;
         log(`Lot ${Math.floor(i/BATCH)+1} — Erreur : ${result.error}`, 'err');
