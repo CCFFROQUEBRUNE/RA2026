@@ -584,10 +584,13 @@ async function startImport() {
   const BATCH = 20;
   for (let i = 0; i < sheetData.length; i += BATCH) {
     const batch = sheetData.slice(i, i + BATCH);
+    const isFirst = (i === 0); // premier lot = effacement + réécriture depuis début
     try {
       const result = await callAS({
         action: 'importBenevoles',
         data: JSON.stringify(batch),
+        offset: i,        // position de départ dans la liste complète
+        isFirst: isFirst  // indique au GS d'effacer au premier lot uniquement
       });
       if (result.ok) {
         ok += result.data.updated || 0;
