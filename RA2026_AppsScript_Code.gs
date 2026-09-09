@@ -94,7 +94,7 @@ function doGet(e) {
           commentaires: JSON.parse(e.parameter.data || '[]'),
         }, callback);
       case 'importBenevoles':
-        return importBenevoles(JSON.parse(e.parameter.data || '[]'), callback);
+        return importBenevoles(JSON.parse(e.parameter.data || '[]'), callback, e.parameter);
       case 'getSaisieGaillarde':
         return getSaisieGaillarde(e.parameter.jour, callback);
       case 'saveSaisieGaillarde':
@@ -666,13 +666,17 @@ function testSaveSaisie() {
 
 // ============================================================
 // IMPORT BENEVOLES — depuis admin.html (xlsx → Sheets)
-// Comportement : REMPLACEMENT COMPLET
-//   - Efface toutes les lignes de données existantes (garde les 2 lignes d'en-tête)
-//   - Réécrit la liste complète depuis le fichier source
+// Comportement : REMPLACEMENT COMPLET par lots
+//   - Lot 1 (isFirst=true)  : efface toutes les données puis écrit à partir de la ligne 3
+//   - Lots suivants         : écrit à partir de la ligne 3 + offset
 //   - Usage : avant chaque Jx pour refléter la liste à jour
 // ============================================================
 function importBenevoles(batch, callback) {
   if (!batch || !batch.length) return jsonErr('Données vides', callback);
+
+  const params  = arguments[2] || {}; // paramètres supplémentaires passés par doGet
+  const offset  = parseInt(params.offset  || '0', 10);
+  const isFirst = params.isFirst === 'true' || params.isFirst === true;
 
   const ws      = getSheet(TAB.BENEVOLES);
   const data    = ws.getDataRange().getValues();
@@ -689,17 +693,20 @@ function importBenevoles(batch, callback) {
 
   if (nomIdx === -1) return jsonErr('Colonne NOM introuvable dans REF_Benevoles', callback);
 
-  // ── Effacer toutes les lignes de données (garder lignes 1 et 2 = titre + en-têtes)
-  const lastRow = ws.getLastRow();
-  if (lastRow > 2) {
-    ws.getRange(3, 1, lastRow - 2, nbCols).clearContent();
+  // ── Premier lot : effacer toutes les données existantes ──────
+  if (isFirst) {
+    const lastRow = ws.getLastRow();
+    if (lastRow > 2) {
+      ws.getRange(3, 1, lastRow - 2, nbCols).clearContent();
+    }
   }
 
-  // ── Réécrire toute la liste depuis le batch ───────────────
+  // ── Écrire le lot à la bonne position ────────────────────────
   batch.forEach((b, idx) => {
-    const rowNum = idx + 3; // ligne 3 = premier bénévole
-    const nomVal = (b.nomSeul || b.nom.split(' ')[0]).trim();
-    const nextId = 'BEN' + String(idx + 1).padStart(3, '0');
+    const globalIdx = offset + idx;          // position dans la liste complète
+    const rowNum    = globalIdx + 3;         // ligne Sheets (3 = premier bénévole)
+    const nextId    = 'BEN' + String(globalIdx + 1).padStart(3, '0');
+    const nomVal    = (b.nomSeul || b.nom.split(' ')[0]).trim();
 
     const newRow = new Array(nbCols).fill('');
     if (idIdx     !== -1) newRow[idIdx]     = nextId;
