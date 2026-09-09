@@ -666,18 +666,19 @@ function testSaveSaisie() {
 
 // ============================================================
 // IMPORT BENEVOLES — depuis admin.html (xlsx → Sheets)
-// - Bénévole trouvé par NOM → mise à jour J1→J5
-// - Bénévole absent         → création automatique de la ligne
-// - Lignes parasites (ID ne commençant pas par BEN) ignorées
+// Comportement : REMPLACEMENT COMPLET
+//   - Efface toutes les lignes de données existantes (garde les 2 lignes d'en-tête)
+//   - Réécrit la liste complète depuis le fichier source
+//   - Usage : avant chaque Jx pour refléter la liste à jour
 // ============================================================
 function importBenevoles(batch, callback) {
   if (!batch || !batch.length) return jsonErr('Données vides', callback);
 
   const ws      = getSheet(TAB.BENEVOLES);
-  let   data    = ws.getDataRange().getValues();
+  const data    = ws.getDataRange().getValues();
   const headers = data[1].map(h => String(h).trim());
 
-  const JX_CODES = ['J1','J2','J3','J4','J5'];
+  const JX_CODES  = ['J1','J2','J3','J4','J5'];
   const jxColIdx  = JX_CODES.map(jx => headers.findIndex(h => h.startsWith(jx)));
   const nomIdx    = headers.indexOf('NOM');
   const prenomIdx = headers.indexOf('PRENOM');
@@ -688,53 +689,33 @@ function importBenevoles(batch, callback) {
 
   if (nomIdx === -1) return jsonErr('Colonne NOM introuvable dans REF_Benevoles', callback);
 
-  let updated = 0, inserted = 0;
+  // ── Effacer toutes les lignes de données (garder lignes 1 et 2 = titre + en-têtes)
+  const lastRow = ws.getLastRow();
+  if (lastRow > 2) {
+    ws.getRange(3, 1, lastRow - 2, nbCols).clearContent();
+  }
 
-  batch.forEach(b => {
-    const nomRecherche = (b.nomSeul || b.nom.split(' ')[0]).trim();
+  // ── Réécrire toute la liste depuis le batch ───────────────
+  batch.forEach((b, idx) => {
+    const rowNum = idx + 3; // ligne 3 = premier bénévole
+    const nomVal = (b.nomSeul || b.nom.split(' ')[0]).trim();
+    const nextId = 'BEN' + String(idx + 1).padStart(3, '0');
 
-    // Recherche par NOM — uniquement dans les lignes bénévoles valides (ID commence par BEN)
-    let foundRow = -1;
-    for (let r = 2; r < data.length; r++) {
-      const rowId  = String(data[r][idIdx] || '').trim().toUpperCase();
-      if (!rowId.startsWith('BEN')) continue;  // ← ignorer lignes parasites
-      if (String(data[r][nomIdx] || '').trim() === nomRecherche) {
-        foundRow = r; break;
-      }
-    }
+    const newRow = new Array(nbCols).fill('');
+    if (idIdx     !== -1) newRow[idIdx]     = nextId;
+    if (nomIdx    !== -1) newRow[nomIdx]    = nomVal;
+    if (prenomIdx !== -1) newRow[prenomIdx] = (b.prenom || '').trim();
+    if (telIdx    !== -1) newRow[telIdx]    = (b.tel    || '').trim();
+    if (actifIdx  !== -1) newRow[actifIdx]  = 'OUI';
+    JX_CODES.forEach((jx, i) => {
+      const ci = jxColIdx[i];
+      if (ci !== -1) newRow[ci] = b.jx[i] === 1 ? 1 : '';
+    });
 
-    if (foundRow !== -1) {
-      // ── Trouvé → mise à jour Jx uniquement ───────────────────
-      JX_CODES.forEach((jx, i) => {
-        const ci = jxColIdx[i];
-        if (ci !== -1) ws.getRange(foundRow + 1, ci + 1).setValue(b.jx[i] === 1 ? 1 : '');
-      });
-      updated++;
-    } else {
-      // ── Absent → création d'une nouvelle ligne ────────────────
-      // Compter uniquement les vraies lignes bénévoles pour l'ID
-      const nbBenevoles = data.slice(2).filter(row =>
-        String(row[idIdx] || '').trim().toUpperCase().startsWith('BEN')
-      ).length;
-      const nextId = 'BEN' + String(nbBenevoles + 1).padStart(3, '0');
-
-      const newRow = new Array(nbCols).fill('');
-      if (idIdx     !== -1) newRow[idIdx]     = nextId;
-      if (nomIdx    !== -1) newRow[nomIdx]    = nomRecherche;
-      if (prenomIdx !== -1) newRow[prenomIdx] = (b.prenom || '').trim();
-      if (telIdx    !== -1) newRow[telIdx]    = (b.tel    || '').trim();
-      if (actifIdx  !== -1) newRow[actifIdx]  = 'OUI';
-      JX_CODES.forEach((jx, i) => {
-        const ci = jxColIdx[i];
-        if (ci !== -1) newRow[ci] = b.jx[i] === 1 ? 1 : '';
-      });
-      ws.appendRow(newRow);
-      inserted++;
-      data = ws.getDataRange().getValues();
-    }
+    ws.getRange(rowNum, 1, 1, nbCols).setValues([newRow]);
   });
 
-  return jsonOk({ updated, inserted, total: batch.length }, callback);
+  return jsonOk({ updated: batch.length, inserted: 0, total: batch.length }, callback);
 }
 
 // ============================================================
