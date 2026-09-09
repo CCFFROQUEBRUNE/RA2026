@@ -668,6 +668,7 @@ function testSaveSaisie() {
 // IMPORT BENEVOLES — depuis admin.html (xlsx → Sheets)
 // - Bénévole trouvé par NOM → mise à jour J1→J5
 // - Bénévole absent         → création automatique de la ligne
+// - Lignes parasites (ID ne commençant pas par BEN) ignorées
 // ============================================================
 function importBenevoles(batch, callback) {
   if (!batch || !batch.length) return jsonErr('Données vides', callback);
@@ -677,7 +678,7 @@ function importBenevoles(batch, callback) {
   const headers = data[1].map(h => String(h).trim());
 
   const JX_CODES = ['J1','J2','J3','J4','J5'];
-  const jxColIdx = JX_CODES.map(jx => headers.findIndex(h => h.startsWith(jx)));
+  const jxColIdx  = JX_CODES.map(jx => headers.findIndex(h => h.startsWith(jx)));
   const nomIdx    = headers.indexOf('NOM');
   const prenomIdx = headers.indexOf('PRENOM');
   const telIdx    = headers.indexOf('TELEPHONE');
@@ -692,10 +693,14 @@ function importBenevoles(batch, callback) {
   batch.forEach(b => {
     const nomRecherche = (b.nomSeul || b.nom.split(' ')[0]).trim();
 
-    // Recherche par NOM dans les données actuelles
+    // Recherche par NOM — uniquement dans les lignes bénévoles valides (ID commence par BEN)
     let foundRow = -1;
     for (let r = 2; r < data.length; r++) {
-      if (String(data[r][nomIdx] || '').trim() === nomRecherche) { foundRow = r; break; }
+      const rowId  = String(data[r][idIdx] || '').trim().toUpperCase();
+      if (!rowId.startsWith('BEN')) continue;  // ← ignorer lignes parasites
+      if (String(data[r][nomIdx] || '').trim() === nomRecherche) {
+        foundRow = r; break;
+      }
     }
 
     if (foundRow !== -1) {
@@ -707,7 +712,12 @@ function importBenevoles(batch, callback) {
       updated++;
     } else {
       // ── Absent → création d'une nouvelle ligne ────────────────
-      const nextId = 'BEN' + String(data.length - 1).padStart(3, '0');
+      // Compter uniquement les vraies lignes bénévoles pour l'ID
+      const nbBenevoles = data.slice(2).filter(row =>
+        String(row[idIdx] || '').trim().toUpperCase().startsWith('BEN')
+      ).length;
+      const nextId = 'BEN' + String(nbBenevoles + 1).padStart(3, '0');
+
       const newRow = new Array(nbCols).fill('');
       if (idIdx     !== -1) newRow[idIdx]     = nextId;
       if (nomIdx    !== -1) newRow[nomIdx]    = nomRecherche;
@@ -720,7 +730,6 @@ function importBenevoles(batch, callback) {
       });
       ws.appendRow(newRow);
       inserted++;
-      // Relire pour que le prochain bénévole voie la nouvelle ligne
       data = ws.getDataRange().getValues();
     }
   });
