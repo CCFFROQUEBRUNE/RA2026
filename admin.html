@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RA2026 — Admin Import</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="192x192" href="favicon_192.png">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -584,18 +586,14 @@ async function startImport() {
   const BATCH = 20;
   for (let i = 0; i < sheetData.length; i += BATCH) {
     const batch = sheetData.slice(i, i + BATCH);
-    const isFirst = (i === 0); // premier lot = effacement + réécriture depuis début
     try {
       const result = await callAS({
         action: 'importBenevoles',
         data: JSON.stringify(batch),
-        offset: i,        // position de départ dans la liste complète
-        isFirst: isFirst  // indique au GS d'effacer au premier lot uniquement
       });
       if (result.ok) {
         ok += result.data.updated || 0;
-        const ins = result.data.inserted || 0;
-        log(`Lot ${Math.floor(i/BATCH)+1} — ${result.data.updated} mis à jour, ${ins} créé(s) ✓`, 'ok');
+        log(`Lot ${Math.floor(i/BATCH)+1} — ${result.data.updated} ligne(s) mises à jour ✓`, 'ok');
       } else {
         err += batch.length;
         log(`Lot ${Math.floor(i/BATCH)+1} — Erreur : ${result.error}`, 'err');
