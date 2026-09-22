@@ -410,6 +410,47 @@ main {
       </details>
     </div>
   </div>
+  <!-- ============================================================
+       SECTION IMPORT COURSES & POINTS DE PASSAGE
+       ============================================================ -->
+  <div class="card" id="cardCourses">
+    <div class="card-header">🏁 Import Courses & Points de passage</div>
+    <div class="card-body">
+      <div class="info-box" style="margin-bottom:16px">
+        Importe le fichier <strong>REF_Courses_RA2026_J1J5.xlsx</strong> vers Google Sheets.<br>
+        Met à jour <strong>REF_Courses</strong> (27 courses J1→J5) et crée/met à jour
+        <strong>REF_Points</strong> (320 points de passage avec distances ravitos).
+        <br><span style="color:var(--rouge)">⚠ Remplacement complet — les données existantes seront écrasées.</span>
+      </div>
+
+      <div class="upload-zone" id="uploadZoneCourses"
+           onclick="document.getElementById('fileInputCourses').click()"
+           style="margin-bottom:12px">
+        <div class="upload-icon">🏁</div>
+        <div class="upload-title" id="uploadTitleCourses">Sélectionner REF_Courses_RA2026_J1J5.xlsx</div>
+        <div class="upload-sub">Fichier accepté : REF_Courses_RA2026_J1J5.xlsx</div>
+        <input type="file" id="fileInputCourses" accept=".xlsx" style="display:none">
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+        <button class="btn btn-primary" id="btnImportCourses"
+                onclick="startImportCourses()" disabled>
+          ▶ Lancer l'import Courses + Points
+        </button>
+        <button class="btn btn-ghost" onclick="resetCourses()">↩ Annuler</button>
+      </div>
+
+      <!-- Progression -->
+      <div id="coursesProgress" style="display:none">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span id="coursesLabel" style="font-size:13px;color:var(--texte2)">En attente…</span>
+          <span id="coursesPct" style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px">0%</span>
+        </div>
+        <div class="progress-bar-wrap"><div class="progress-bar" id="coursesBar"></div></div>
+        <div class="log-box" id="coursesLog" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
 
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -771,6 +812,141 @@ document.addEventListener('DOMContentLoaded', function() {
     if (el) el.addEventListener('input', function(){ this.value = this.value.replace(/\D/g,''); });
   });
 });
+
+// ============================================================
+// IMPORT COURSES & POINTS — REF_Courses_RA2026_J1J5.xlsx
+// ============================================================
+
+let workbookCourses = null;
+
+// Charger le fichier courses
+document.getElementById('fileInputCourses').addEventListener('change', function() {
+  const file = this.files[0];
+  if (!file) return;
+  document.getElementById('uploadTitleCourses').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    workbookCourses = XLSX.read(e.target.result, { type: 'array' });
+    const sheets = workbookCourses.SheetNames;
+    const hasCourses = sheets.some(s => s.startsWith('COURSES_'));
+    const hasPoints  = sheets.some(s => s.startsWith('POINTS_'));
+    if (!hasCourses || !hasPoints) {
+      alert('Fichier incorrect — attendu : onglets COURSES_Jx et POINTS_Jx');
+      workbookCourses = null;
+      document.getElementById('uploadTitleCourses').textContent = 'Sélectionner REF_Courses_RA2026_J1J5.xlsx';
+      return;
+    }
+    document.getElementById('btnImportCourses').disabled = false;
+    logC(`✓ Fichier chargé — ${sheets.length} onglets détectés`, 'ok');
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+function logC(msg, type) {
+  const box = document.getElementById('coursesLog');
+  const ts  = new Date().toLocaleTimeString('fr-FR');
+  const cls = type === 'ok' ? 'color:var(--vert)' : type === 'err' ? 'color:var(--rouge)' : 'color:var(--texte2)';
+  box.innerHTML += `<div style="${cls}">[${ts}] ${msg}</div>`;
+  box.scrollTop = box.scrollHeight;
+}
+
+function setProgressC(pct, label) {
+  document.getElementById('coursesBar').style.width   = pct + '%';
+  document.getElementById('coursesPct').textContent   = pct + '%';
+  document.getElementById('coursesLabel').textContent = label;
+}
+
+async function startImportCourses() {
+  if (!workbookCourses) return;
+  document.getElementById('coursesProgress').style.display = 'block';
+  document.getElementById('btnImportCourses').disabled = true;
+  document.getElementById('coursesLog').innerHTML = '';
+
+  const BATCH = 20;
+  const JX = ['J1','J2','J3','J4','J5'];
+
+  // ── Collecter toutes les courses (onglets COURSES_Jx) ──────
+  let allCourses = [];
+  for (const jx of JX) {
+    const shName = 'COURSES_' + jx;
+    if (!workbookCourses.SheetNames.includes(shName)) continue;
+    const rows = XLSX.utils.sheet_to_json(workbookCourses.Sheets[shName], { header: 1, defval: '' });
+    const hdrs = rows[1]; // ligne 2 = en-têtes
+    for (let r = 2; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row[0] && !row[1]) continue; // ligne vide ou séparateur
+      const obj = {};
+      hdrs.forEach((h, i) => { if (h) obj[h] = row[i]; });
+      if (obj.ID_COURSE) allCourses.push(obj);
+    }
+  }
+
+  // ── Collecter tous les points (onglets POINTS_Jx) ──────────
+  let allPoints = [];
+  for (const jx of JX) {
+    const shName = 'POINTS_' + jx;
+    if (!workbookCourses.SheetNames.includes(shName)) continue;
+    const rows = XLSX.utils.sheet_to_json(workbookCourses.Sheets[shName], { header: 1, defval: '' });
+    const hdrs = rows[1];
+    for (let r = 2; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row[0] && !row[2]) continue; // ligne vide ou séparateur
+      const obj = {};
+      hdrs.forEach((h, i) => { if (h) obj[h] = row[i]; });
+      if (obj.ID_COURSE && obj.NOM_POINT) allPoints.push(obj);
+    }
+  }
+
+  logC(`📊 ${allCourses.length} courses + ${allPoints.length} points à importer`, '');
+  const totalLots = Math.ceil(allCourses.length / BATCH) + Math.ceil(allPoints.length / BATCH);
+  let lotFait = 0, errs = 0;
+
+  // ── Importer les courses ───────────────────────────────────
+  logC('--- Import REF_Courses ---', '');
+  for (let i = 0; i < allCourses.length; i += BATCH) {
+    const batch   = allCourses.slice(i, i + BATCH);
+    const isFirst = (i === 0);
+    try {
+      const res = await callAS({ action: 'importCourses', data: JSON.stringify(batch),
+                                 offset: i, isFirst });
+      logC(`Lot courses ${Math.floor(i/BATCH)+1} — ${res.data.updated} lignes ✓`, 'ok');
+    } catch(e) {
+      logC(`Lot courses ${Math.floor(i/BATCH)+1} — Erreur`, 'err'); errs++;
+    }
+    lotFait++;
+    setProgressC(Math.round(lotFait/totalLots*100), `Courses : lot ${Math.floor(i/BATCH)+1}`);
+  }
+
+  // ── Importer les points ────────────────────────────────────
+  logC('--- Import REF_Points ---', '');
+  for (let i = 0; i < allPoints.length; i += BATCH) {
+    const batch   = allPoints.slice(i, i + BATCH);
+    const isFirst = (i === 0);
+    try {
+      const res = await callAS({ action: 'importPoints', data: JSON.stringify(batch),
+                                 offset: i, isFirst });
+      logC(`Lot points ${Math.floor(i/BATCH)+1} — ${res.data.updated} lignes ✓`, 'ok');
+    } catch(e) {
+      logC(`Lot points ${Math.floor(i/BATCH)+1} — Erreur`, 'err'); errs++;
+    }
+    lotFait++;
+    setProgressC(Math.round(lotFait/totalLots*100), `Points : lot ${Math.floor(i/BATCH)+1}`);
+  }
+
+  setProgressC(100, 'Terminé');
+  logC(`─── Import terminé — ${allCourses.length} courses + ${allPoints.length} points, ${errs} erreurs ───`,
+       errs > 0 ? 'err' : 'ok');
+  document.getElementById('btnImportCourses').disabled = false;
+}
+
+function resetCourses() {
+  workbookCourses = null;
+  document.getElementById('fileInputCourses').value = '';
+  document.getElementById('uploadTitleCourses').textContent = 'Sélectionner REF_Courses_RA2026_J1J5.xlsx';
+  document.getElementById('btnImportCourses').disabled = true;
+  document.getElementById('coursesProgress').style.display = 'none';
+  document.getElementById('coursesLog').innerHTML = '';
+}
 
 // Charger la config au démarrage
 loadConfig();
