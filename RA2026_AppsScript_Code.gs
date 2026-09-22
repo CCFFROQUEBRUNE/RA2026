@@ -14,11 +14,12 @@ const TAB = {
   PS         : 'REF_PS',
   VEHICULES  : 'REF_Vehicules',
   COURSES    : 'REF_Courses',
+  POINTS     : 'REF_Points',     // points de passage par course et par Jx
   REFERENTS  : 'REF_Referents',
   SAISIE     : 'SAISIE',
   COMM       : 'SAISIE_COMM',
   CONFIG     : 'CONFIG',
-  REF_CONFIG : 'REF_CONFIG',  // sécurité PIN
+  REF_CONFIG : 'REF_CONFIG',     // sécurité PIN
 };
 
 // ── Valeurs par défaut (utilisées si onglet CONFIG absent) ───────────────────
@@ -95,6 +96,10 @@ function doGet(e) {
         }, callback);
       case 'importBenevoles':
         return importBenevoles(JSON.parse(e.parameter.data || '[]'), callback, e.parameter);
+      case 'importCourses':
+        return importCourses(JSON.parse(e.parameter.data || '[]'), callback, e.parameter);
+      case 'importPoints':
+        return importPoints(JSON.parse(e.parameter.data || '[]'), callback, e.parameter);
       case 'getSaisieGaillarde':
         return getSaisieGaillarde(e.parameter.jour, callback);
       case 'saveSaisieGaillarde':
@@ -997,4 +1002,102 @@ function verifyPin(pin, callback) {
   } catch(e) {
     return jsonErr('Erreur verifyPin : ' + e.message, callback);
   }
+}
+
+// ============================================================
+// IMPORT COURSES — depuis admin.html (REF_Courses_RA2026_J1J5.xlsx → Sheets)
+// Comportement : REMPLACEMENT COMPLET par lots
+//   - isFirst=true : efface REF_Courses puis réécrit depuis ligne 2
+//   - Lots suivants : écrit à partir de offset + 2
+// ============================================================
+function importCourses(batch, callback, params) {
+  if (!batch || !batch.length) return jsonErr('Données vides', callback);
+
+  const isFirst = (params.isFirst === 'true' || params.isFirst === true);
+  const offset  = parseInt(params.offset || '0', 10);
+  const nbCols  = 8;
+
+  const ws = getSheet(TAB.COURSES);
+
+  if (isFirst) {
+    const lastRow = ws.getLastRow();
+    if (lastRow > 1) ws.getRange(2, 1, lastRow - 1, nbCols).clearContent();
+    // Créer en-têtes si ligne 1 vide
+    const h = ws.getRange(1, 1, 1, nbCols).getValues()[0];
+    if (!h[0] || String(h[0]).trim() === '') {
+      ws.getRange(1, 1, 1, nbCols).setValues([[
+        'ID_COURSE','NOM_COURSE','SECTEUR','HEURE_DEPART',
+        'HEURE_ARRIVEE','DISTANCE_KM','NB_RAVITOS','JX'
+      ]]);
+      ws.getRange(1,1,1,nbCols)
+        .setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
+    }
+  }
+
+  batch.forEach((row, idx) => {
+    const r = offset + idx + 2;
+    ws.getRange(r, 1, 1, nbCols).setValues([[
+      row.ID_COURSE    || '',
+      row.NOM_COURSE   || '',
+      row.SECTEUR      || '',
+      row.HEURE_DEPART || '',
+      row.HEURE_ARRIVEE|| '',
+      row.DISTANCE_KM  !== undefined ? row.DISTANCE_KM : '',
+      row.NB_RAVITOS   !== undefined ? row.NB_RAVITOS  : '',
+      row.JX           || '',
+    ]]);
+  });
+
+  return jsonOk({ updated: batch.length, total: batch.length }, callback);
+}
+
+// ============================================================
+// IMPORT POINTS — depuis admin.html (REF_Courses_RA2026_J1J5.xlsx → Sheets)
+// Comportement : REMPLACEMENT COMPLET par lots
+//   - Crée REF_Points si absent
+//   - isFirst=true : efface puis réécrit
+// ============================================================
+function importPoints(batch, callback, params) {
+  if (!batch || !batch.length) return jsonErr('Données vides', callback);
+
+  const isFirst = (params.isFirst === 'true' || params.isFirst === true);
+  const offset  = parseInt(params.offset || '0', 10);
+  const nbCols  = 9;
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(TAB.POINTS);
+
+  // Créer REF_Points si absent
+  if (!ws) {
+    ws = ss.insertSheet(TAB.POINTS);
+    ws.getRange(1, 1, 1, nbCols).setValues([[
+      'ID_COURSE','NOM_COURSE','NOM_POINT','PK_KM',
+      'RAVITO','PROCHAIN_RAVITO','KM_PROCHAIN_R','NUM_PS','JX'
+    ]]);
+    ws.getRange(1,1,1,nbCols)
+      .setBackground('#1A3A5C').setFontColor('#FFFFFF').setFontWeight('bold');
+    ws.setFrozenRows(1);
+  }
+
+  if (isFirst) {
+    const lastRow = ws.getLastRow();
+    if (lastRow > 1) ws.getRange(2, 1, lastRow - 1, nbCols).clearContent();
+  }
+
+  batch.forEach((row, idx) => {
+    const r = offset + idx + 2;
+    ws.getRange(r, 1, 1, nbCols).setValues([[
+      row.ID_COURSE       || '',
+      row.NOM_COURSE      || '',
+      row.NOM_POINT       || '',
+      row.PK_KM           !== undefined ? row.PK_KM : '',
+      row.RAVITO          || '',
+      row.PROCHAIN_RAVITO || '',
+      row.KM_PROCHAIN_R   !== undefined ? row.KM_PROCHAIN_R : '',
+      row.NUM_PS          || '',
+      row.JX              || '',
+    ]]);
+  });
+
+  return jsonOk({ updated: batch.length, total: batch.length }, callback);
 }
