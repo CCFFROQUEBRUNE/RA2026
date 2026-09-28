@@ -3087,7 +3087,7 @@ async function loadReferentiels() {
   if (!SHEETS_ENABLED) return;
   try {
     showLoadingBanner('Chargement des référentiels depuis Google Sheets…');
-    const json = await callAS({ action: 'getReferentiels', jour: currentJour });
+    const json = await callASRetry({ action: 'getReferentiels', jour: currentJour });
     if (!json.ok) throw new Error(json.error);
     const d = json.data;
 
