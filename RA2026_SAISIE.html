@@ -3063,7 +3063,7 @@ function callAS(params) {
     const qs = new URLSearchParams({ ...params, callback: cbName });
     const s  = document.createElement('script');
     s.src    = `${APPS_SCRIPT_URL}?${qs}`;
-    s.onerror = () => { clearTimeout(timeout); delete window[cbName]; reject(new Error('Script error')); };
+   s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
     document.head.appendChild(s);
     setTimeout(() => s.remove(), 50000);
   });
