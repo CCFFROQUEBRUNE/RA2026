@@ -3054,7 +3054,7 @@ function callAS(params) {
     const timeout = setTimeout(() => {
       delete window[cbName];
       reject(new Error('Timeout (45s) — connexion lente ?'));
-    }, 45000); // 45s pour ADSL
+    }, 90000); // 90s pour ADSL
     window[cbName] = (data) => {
       clearTimeout(timeout);
       delete window[cbName];
@@ -3065,7 +3065,7 @@ function callAS(params) {
     s.src    = `${APPS_SCRIPT_URL}?${qs}`;
    s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
     document.head.appendChild(s);
-    setTimeout(() => s.remove(), 50000);
+    setTimeout(() => s.remove(), 95000);
   });
 }
 
