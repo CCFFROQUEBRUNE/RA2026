@@ -631,6 +631,8 @@ async function startImport() {
       const result = await callAS({
         action: 'importBenevoles',
         data: JSON.stringify(batch),
+        offset: i,
+        isFirst: i === 0,
       });
       if (result.ok) {
         ok += result.data.updated || 0;
