@@ -1009,7 +1009,7 @@
     _setLoading(true);
     // JSONP direct (callASRetry pas encore déclaré à ce stade du DOM)
     var cbName = 'pinCb_' + Math.random().toString(36).slice(2);
-    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 45000);
+    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 90000); // 90s cold start
     window[cbName] = function(data) {
       clearTimeout(timer); delete window[cbName]; _setLoading(false);
       if (data.ok) { sessionStorage.setItem(SESSION_KEY,'1'); _cacher(); }
@@ -1019,7 +1019,7 @@
     s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(saisi) + '&callback=' + cbName;
     s.onerror = function(){ clearTimeout(timer); delete window[cbName]; _onError('Erreur réseau'); };
     document.head.appendChild(s);
-    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 50000);
+    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 95000);
   }
   function _onError(msg){ _setLoading(false); erreurEl.textContent=msg; saisi=''; _maj(); }
   function _cacher()    { if (overlay) overlay.style.display='none'; }
@@ -3174,8 +3174,8 @@ async function loadSaisieFromSheets(jour) {
   try {
     showLoadingBanner(`Chargement saisie ${jour} depuis Google Sheets…`);
     const [jsonSaisie, jsonComm] = await Promise.all([
-      callAS({ action: 'getSaisie', jour }),
-      callAS({ action: 'getCommentaires', jour }),
+      callASRetry({ action: 'getSaisie', jour }),
+      callASRetry({ action: 'getCommentaires', jour }),
     ]);
     hideLoadingBanner();
     if (!jsonSaisie.ok) {
