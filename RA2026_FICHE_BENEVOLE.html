@@ -265,7 +265,7 @@
 // ============================================================
 (function () {
   'use strict';
-  var AS_URL      = 'https://script.google.com/macros/s/AKfycbx3-9qOcnRxX29beMLYWvaelrdwPK1eI4eGJKOfI4MUub0f99Bq1JTUHdtPYl4Qv432/exec';
+  var AS_URL      = 'https://script.google.com/macros/s/AKfycbxn5wLvHEiVHduurSgdUL51dV6KIn18oOYD40jEEN5EOJdxUA5WRApXkwihnrES9wPP/exec';
   var SESSION_KEY = 'pinOk';
   var saisi       = '';
   var overlay     = document.getElementById('pin-overlay');
@@ -309,7 +309,7 @@
     if (saisi.length < 4) return;
     _setLoading(true);
     var cbName = 'pinCbF_' + Math.random().toString(36).slice(2);
-    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 45000);
+    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 90000); // 90s cold start
     window[cbName] = function(data) {
       clearTimeout(timer); delete window[cbName]; _setLoading(false);
       if (data.ok) { sessionStorage.setItem(SESSION_KEY,'1'); _cacher(); }
@@ -319,7 +319,7 @@
     s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(saisi) + '&callback=' + cbName;
     s.onerror = function(){ clearTimeout(timer); delete window[cbName]; _onError('Erreur réseau'); };
     document.head.appendChild(s);
-    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 50000);
+    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 95000);
   }
   function _onError(msg){ _setLoading(false); erreurEl.textContent=msg; saisi=''; _maj(); }
   function _cacher()    { if (overlay) overlay.style.display='none'; }
@@ -432,7 +432,7 @@
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3-9qOcnRxX29beMLYWvaelrdwPK1eI4eGJKOfI4MUub0f99Bq1JTUHdtPYl4Qv432/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxn5wLvHEiVHduurSgdUL51dV6KIn18oOYD40jEEN5EOJdxUA5WRApXkwihnrES9wPP/exec';
 
 const JOURS = [
   { id:'J1', label:'J1', date:'MERCREDI 07/10/2026' },
@@ -452,7 +452,7 @@ function callAS(params) {
     const timer  = setTimeout(() => {
       delete window[cbName];
       reject(new Error('Timeout — connexion trop lente'));
-    }, 45000);
+    }, 90000); // 90s cold start Apps Script
     window[cbName] = data => {
       clearTimeout(timer);
       delete window[cbName];
@@ -460,10 +460,22 @@ function callAS(params) {
     };
     const s = document.createElement('script');
     s.src = APPS_SCRIPT_URL + '?' + new URLSearchParams({ ...params, callback: cbName });
-    s.onerror = () => { clearTimeout(timer); delete window[cbName]; reject(new Error('Erreur réseau')); };
+    s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
     document.head.appendChild(s);
-    setTimeout(() => { try { s.remove(); } catch(e){} }, 50000);
+    setTimeout(() => { try { s.remove(); } catch(e){} }, 95000);
   });
+}
+
+// Retry automatique — 2 tentatives max
+async function callASRetry(params, maxRetries = 2) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await callAS(params);
+    } catch(e) {
+      if (attempt === maxRetries) throw e;
+      console.warn(`Tentative ${attempt} échouée, retry…`, e.message);
+    }
+  }
 }
 
 // ── État ──────────────────────────────────────────────────────────────────────
@@ -554,7 +566,7 @@ async function accederParPS() {
   btn.textContent = '⏳'; btn.disabled = true;
   showLoader('Recherche PS ' + psVal + ' — ' + (SOURCE === 'lg' ? 'LA_GAILLARDE' : 'Tous Secteurs') + '…');
   try {
-    const json = await callAS({ action:'getFichePS', ps:psVal, jour:JOUR_COURANT, source:SOURCE });
+    const json = await callASRetry({ action:'getFichePS', ps:psVal, jour:JOUR_COURANT, source:SOURCE });
     if (!json.ok) throw new Error(json.error || 'Erreur inconnue');
     if (!json.data) {
       errEl.textContent = `PS ${psVal} non trouvé — ${SOURCE === 'lg' ? 'LA_GAILLARDE' : 'Tous Secteurs'} — ${JOUR_COURANT}`;
@@ -587,7 +599,7 @@ async function accederParNom() {
   btn.textContent = '⏳'; btn.disabled = true;
   showLoader('Recherche "' + nom + '" — Tous Secteurs — ' + JOUR_COURANT + '…');
   try {
-    const json = await callAS({ action:'getFicheParNom', nom, jour:JOUR_COURANT, source:'ts' });
+    const json = await callASRetry({ action:'getFicheParNom', nom, jour:JOUR_COURANT, source:'ts' });
     if (!json.ok) throw new Error(json.error || 'Erreur inconnue');
 
     const results = (json.data && json.data.results) || [];
@@ -618,7 +630,7 @@ async function chargerFicheDepuisResult(r) {
   document.getElementById('screenChoix').style.display = 'none';
   showLoader('Chargement fiche PS ' + psNum + '…');
   try {
-    const json = await callAS({ action:'getFichePS', ps:psNum, jour:JOUR_COURANT, source:'ts' });
+    const json = await callASRetry({ action:'getFichePS', ps:psNum, jour:JOUR_COURANT, source:'ts' });
     if (json.ok && json.data) {
       afficherFiche(psNum, JOUR_COURANT, json.data);
     } else {
