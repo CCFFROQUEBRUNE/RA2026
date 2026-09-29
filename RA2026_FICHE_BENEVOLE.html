@@ -710,7 +710,8 @@ function afficherFiche(psNum, jourId, d) {
     html1 += row('Secteur', `<span class="info-val secteur">${d.secteur}</span>`, true);
     html1 += row('Référent', d.referant || '—');
     if (tel !== '—') html1 += row('Tél. référent', `<span class="info-val tel">📞 ${tel}</span>`, true);
-    if (benvs.length > 1) html1 += row('Coéquipier(s)', benvs.slice(1).join('<br>'));
+    // Tous les bénévoles affectés à ce PS (le bénévole 1 n'était pas affiché : slice(1) le retirait)
+    if (benvs.length) html1 += row(benvs.length > 1 ? 'Bénévoles du PS' : 'Bénévole du PS', benvs.join('<br>'));
   }
   html1 += `</div></div>`;
   body.insertAdjacentHTML('beforeend', html1);
