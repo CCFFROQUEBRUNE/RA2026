@@ -1147,11 +1147,17 @@ const JOURS = [
   { id: 'J5', label: 'J5', date: 'DIMANCHE 11/10/2026' },
 ];
 
-const SECTEURS = [
-  'CABRET','LA_DOMI','CLAPIERS','LA_FLEITE','LA_GAILLARDE',
-  'FOURNEL','ESTEREL','MAURES','MONASTERE','PALAYSON',
-  'JAUME','LES CLOS','VILLAGE','VALDINGARDE'
-];
+// Alimenté au chargement depuis Google Sheets : onglet REF_Secteurs, colonne NOM_SECTEUR (A).
+// Pour modifier la liste : éditer le Sheet, jamais ce fichier. Ordre = ordre du Sheet.
+// ⚠ 'LA_GAILLARDE' doit rester écrit exactement ainsi dans le Sheet (clé du module LG).
+const SECTEURS = [];
+
+// Valeur déjà enregistrée mais absente de la liste actuelle du Sheet (ex. renommage) :
+// on la garde visible et sélectionnée, marquée « hors liste », plutôt que de la perdre.
+function orphanOpt(list, val) {
+  if (!val || !list.length || list.includes(val)) return '';
+  return `<option value="${val}" selected>${val} ⚠ hors liste</option>`;
+}
 
 const REFERANTS = [
   { nom: 'Référant_01', tel: '0610100010' },
@@ -1171,13 +1177,9 @@ const REFERANTS = [
   { nom: 'Référant_15', tel: '0624240024' },
 ];
 
-const VEHICULES = [
-  'JIMNY','MITSU','PANDA','R5','R6','R7','R8','R9',
-  'V PERSO ALAIN','V PERSO RUBIO','V PERSO MARCO',
-  'TOYOTA FRANCIS','PETIT LAND','MOTO','QUAD','SPRINTER',
-  'VEH_17','VEH_18','VEH_19','VEH_20','VEH_21',
-  'VEH_22','VEH_23','VEH_24','VEH_25',
-]; // 25 véhicules (provision — remplacer les VEH_XX par les vrais noms)
+// Alimenté au chargement depuis Google Sheets : onglet REF_Vehicules, colonne NOM_VEHICULE (B).
+// Pour modifier la flotte : éditer le Sheet, jamais ce fichier. Ordre = ordre du Sheet.
+const VEHICULES = [];
 
 const HEURES_MEP = [
   '5h45','6h00','6h15','6h30','6h45','7h00','7h15','7h30',
@@ -1379,7 +1381,7 @@ function renderSecteur(si) {
   // secteur name options
   let sectOpts = SECTEURS.map(sec =>
     `<option value="${sec}" ${sec === s.secteur ? 'selected' : ''}>${sec}</option>`
-  ).join('');
+  ).join('') + orphanOpt(SECTEURS, s.secteur);
 
   // referant options — value = NOM seul, texte = NOM+PRENOM si dispo
   let refOpts = `<option value="">— Référant —</option>` + REFERANTS.map(r => {
@@ -1471,7 +1473,7 @@ function renderPSRow(si, ri, row, secteur) {
   }).join('');
   const vehOpts = (val) => `<option value="">—</option>` + VEHICULES.map(v =>
     `<option value="${v}" ${v === val ? 'selected' : ''}>${v}</option>`
-  ).join('');
+  ).join('') + orphanOpt(VEHICULES, val);
   const heureOpts = (val) => `<option value="">—</option>` + HEURES_MEP.map(h =>
     `<option value="${h}" ${h === val ? 'selected' : ''}>${h}</option>`
   ).join('');
@@ -1561,6 +1563,10 @@ function switchJour(jid) {
 }
 
 function addSecteur() {
+  if (!SECTEURS.length) {
+    toast('Liste des secteurs non chargée depuis Sheets — utilisez « Réessayer »', 'err');
+    return;
+  }
   state[currentJour].push({
     secteur: SECTEURS[0], referant: '', hmepSect: '6h00', collapsed: false,
     commentaires: ['','',''],
@@ -2055,7 +2061,8 @@ function glrdBenvOpts(selected='') {
 
 function glrdVehOpts(selected='') {
   return '<option value="">—</option>' +
-    VEHICULES.map(v => `<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
+    VEHICULES.map(v => `<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('') +
+    orphanOpt(VEHICULES, selected);
 }
 
 function glrdHeurOpts(selected='') {
@@ -3111,6 +3118,24 @@ async function loadReferentiels() {
       BENEVOLES_LABEL[nomSeul] = label;
     });
 
+    // ── Secteurs et véhicules : source de vérité = Sheets (REF_Secteurs / REF_Vehicules)
+    // Nettoyage : texte, trim, lignes vides ignorées, doublons supprimés, ordre du Sheet conservé.
+    // Les deux listes sont validées AVANT d'écraser quoi que ce soit.
+    const nettoyer = (arr) => {
+      const seen = new Set(), out = [];
+      (arr || []).forEach(x => {
+        const v = String(x && typeof x === 'object' ? x.nom : x).trim();
+        if (v && v !== 'undefined' && v !== 'null' && !seen.has(v)) { seen.add(v); out.push(v); }
+      });
+      return out;
+    };
+    const listeSect = nettoyer(d.secteurs);
+    const listeVeh  = nettoyer(d.vehicules);
+    if (!listeSect.length) throw new Error('REF_Secteurs vide ou illisible');
+    if (!listeVeh.length)  throw new Error('REF_Vehicules vide ou illisible');
+    SECTEURS.length = 0;  listeSect.forEach(v => SECTEURS.push(v));
+    VEHICULES.length = 0; listeVeh.forEach(v => VEHICULES.push(v));
+
     // Référants : depuis REF_Referents (d.referants) si disponible, sinon depuis secteurs
     REFERANTS.length = 0;
     if (d.referants && d.referants.length) {
@@ -3158,14 +3183,53 @@ async function loadReferentiels() {
     }
 
     hideLoadingBanner();
-    // Re-render complet pour que les listes déroulantes (référants, PS) soient à jour
+    hideRefError();
+    // Re-render complet pour que les listes déroulantes (référants, PS, secteurs, véhicules) soient à jour
     renderAll();
-    toast('Référentiels chargés depuis Sheets ✓');
+    toast(`Référentiels chargés ✓ (${SECTEURS.length} secteurs, ${VEHICULES.length} véhicules)`);
   } catch(e) {
     hideLoadingBanner();
-    toast('Mode hors-ligne (Sheets inaccessible)', 'warn');
     console.warn('Sheets error:', e);
+    if (!SECTEURS.length || !VEHICULES.length) {
+      // Aucune liste disponible (premier chargement échoué) : pas de repli en dur, on bloque et on propose de réessayer
+      showRefError(e && e.message ? e.message : 'Sheets inaccessible');
+    } else {
+      // Listes déjà chargées plus tôt dans la session (ex. changement de jour) : on les garde
+      toast('Sheets inaccessible — listes précédentes conservées', 'warn');
+    }
   }
+}
+
+// Bandeau bloquant : listes Secteurs/Véhicules non chargées
+function showRefError(detail) {
+  let el = document.getElementById('refErrorBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'refErrorBanner';
+    el.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:600;
+      background:#7B1E14;color:#fff;text-align:center;padding:10px 12px;
+      font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:1px;
+      border-bottom:3px solid #E74C3C;box-shadow:0 4px 20px rgba(0,0,0,.5);`;
+    document.body.prepend(el);
+  }
+  el.innerHTML = '';
+  const msg = document.createElement('span');
+  msg.textContent = '⚠ Listes Secteurs / Véhicules non chargées depuis Google Sheets — saisie et sauvegarde bloquées. (' + detail + ')  ';
+  const btn = document.createElement('button');
+  btn.textContent = '↻ Réessayer';
+  btn.style.cssText = `margin-left:8px;padding:5px 16px;border-radius:6px;border:1px solid #fff;
+    background:#fff;color:#7B1E14;font-family:'Barlow Condensed',sans-serif;
+    font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;`;
+  btn.onclick = () => {
+    btn.disabled = true; btn.textContent = '⏳';
+    loadReferentiels().then(() => { btn.disabled = false; btn.textContent = '↻ Réessayer'; if (SECTEURS.length && VEHICULES.length) loadSaisieFromSheets(currentJour); });
+  };
+  el.appendChild(msg); el.appendChild(btn);
+  el.style.display = 'block';
+}
+function hideRefError() {
+  const el = document.getElementById('refErrorBanner');
+  if (el) el.style.display = 'none';
 }
 
 // Charge la saisie existante d'un jour depuis Sheets
@@ -3209,6 +3273,10 @@ async function loadSaisieFromSheets(jour) {
 async function saveToSheets() {
   try { localStorage.setItem('ra2026_saisie', JSON.stringify(state)); } catch(e) {}
   if (!SHEETS_ENABLED) { toast('Brouillon local sauvegardé ✓'); return; }
+  if (!SECTEURS.length || !VEHICULES.length) {
+    toast('Listes Secteurs/Véhicules non chargées — sauvegarde Sheets bloquée (brouillon local conservé)', 'err');
+    return;
+  }
 
   const btn = document.querySelector('.btn-pdf');
   if (btn) { btn.textContent = '⏳ Envoi…'; btn.disabled = true; }
