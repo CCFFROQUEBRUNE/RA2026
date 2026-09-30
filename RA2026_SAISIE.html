@@ -1930,6 +1930,16 @@ function glrdBenev() {
   return glrdBenevCache[glrdJour] || { noms: BENEVOLES, label: BENEVOLES_LABEL, data: BENEVOLES_DATA };
 }
 
+// Nom à AFFICHER pour une valeur stockée (NOM ou "NOM Prénom") : libellé complet NOM Prénom.
+// Cherche d'abord la liste du jour LG, puis les autres jours déjà chargés, puis la liste TS courante.
+function glrdNomAff(nom) {
+  if (!nom) return '';
+  const l = glrdBenev().label[nom];
+  if (l) return l;
+  for (const j in glrdBenevCache) { if (glrdBenevCache[j].label[nom]) return glrdBenevCache[j].label[nom]; }
+  return BENEVOLES_LABEL[nom] || nom;
+}
+
 // Recherche d'un bénévole (téléphone…) : liste du jour LG d'abord, puis liste TS courante
 function glrdFindBenev(nom) {
   if (!nom) return null;
@@ -2325,7 +2335,7 @@ function glrdUpdateStats() {
 
   // Doublons bénévoles
   Object.entries(benvCount).forEach(([b, cnt]) => {
-    if (cnt > 1) alerts.push(`⚠ Bénévole <strong>${b}</strong> affecté ${cnt}× sur ${glrdJour} LA_GAILLARDE`);
+    if (cnt > 1) alerts.push(`⚠ Bénévole <strong>${glrdNomAff(b)}</strong> affecté ${cnt}× sur ${glrdJour} LA_GAILLARDE`);
   });
 
   // Doublons véhicules dans LG
@@ -2388,7 +2398,7 @@ function glrdRenderFiches() {
   const selBenv = document.getElementById('glrdBenvSelect');
   const prevBenv = selBenv.value;
   selBenv.innerHTML = '<option value="">— Tous —</option>' +
-    [...benvoles].sort().map(b => `<option value="${b}" ${b===prevBenv?'selected':''}>${b}</option>`).join('');
+    [...benvoles].sort((a,b)=>glrdNomAff(a).localeCompare(glrdNomAff(b),'fr')).map(b => `<option value="${b}" ${b===prevBenv?'selected':''}>${glrdNomAff(b)}</option>`).join('');
 
   // Peupler sélecteur PS
   const selPS = document.getElementById('glrdPSFicheSelect');
@@ -2437,7 +2447,7 @@ function glrdApplyFilter() {
 }
 
 function glrdFicheHTML(r, jourInfo) {
-  const accompagnants = [r.ACC_1, r.ACC_2, r.ACC_3].filter(Boolean).join(', ');
+  const accompagnants = [r.ACC_1, r.ACC_2, r.ACC_3].filter(Boolean).map(glrdNomAff).join(', ');
   const vehicules     = [r.VEH_A, r.VEH_B].filter(Boolean).join(' + ');
   const radios        = [
     r.NB_COM ? `${r.NB_COM} COM` : '',
@@ -2469,7 +2479,7 @@ function glrdFicheHTML(r, jourInfo) {
         <div class="glrd-fiche-section">👤 Signaleurs</div>
         <div class="glrd-fiche-row">
           <span class="glrd-fiche-label">Signaleur Référent</span>
-          <span class="glrd-fiche-val"><strong style="font-size:14px">${r.REFERENT || '—'}</strong></span>
+          <span class="glrd-fiche-val"><strong style="font-size:14px">${glrdNomAff(r.REFERENT) || '—'}</strong></span>
         </div>
         ${accompagnants ? `<div class="glrd-fiche-row">
           <span class="glrd-fiche-label">Accompagnants</span>
@@ -2483,7 +2493,7 @@ function glrdFicheHTML(r, jourInfo) {
         </div>
         <div class="glrd-fiche-row">
           <span class="glrd-fiche-label">Mise en place par</span>
-          <span class="glrd-fiche-val">${r.MEP_PAR || '—'}</span>
+          <span class="glrd-fiche-val">${glrdNomAff(r.MEP_PAR) || '—'}</span>
         </div>
         <div class="glrd-fiche-row">
           <span class="glrd-fiche-label">RDV MeP</span>
@@ -2531,7 +2541,7 @@ function glrdFicheHTML(r, jourInfo) {
         </div>
         <div class="glrd-fiche-row">
           <span class="glrd-fiche-label">Contact MeP</span>
-          <span class="glrd-fiche-val">${r.MEP_PAR || '—'}${telRef ? ' — 📞 ' + telRef : ''}</span>
+          <span class="glrd-fiche-val">${glrdNomAff(r.MEP_PAR) || '—'}${telRef ? ' — 📞 ' + telRef : ''}</span>
         </div>
 
         ${comms.length ? `
@@ -2605,7 +2615,7 @@ function glrdRenderReport() {
             const approx = glrdBenev().data.find(b => b.nom.startsWith(nomSeul)) || BENEVOLES_DATA.find(b => b.nom.startsWith(nomSeul));
             return approx ? approx.tel || '' : '';
           })();
-          const accompagnants = [r.ACC_1,r.ACC_2,r.ACC_3].filter(Boolean).join(', ');
+          const accompagnants = [r.ACC_1,r.ACC_2,r.ACC_3].filter(Boolean).map(glrdNomAff).join(', ');
           const vehicules = [r.VEH_A,r.VEH_B].filter(Boolean).join(' + ');
           const radios = [
             r.NB_COM ? `${r.NB_COM} COM` : '',
@@ -2615,7 +2625,7 @@ function glrdRenderReport() {
           const obs = [r.COMM_A,r.COMM_B,r.COMM_C].filter(Boolean).join(' / ');
           return `<tr>
             <td><strong>${r.NUM_PS||'—'}</strong><br><span style="font-size:11px;color:#666">${r.LIEU_DIT||''}</span></td>
-            <td>${r.REFERENT||'—'}</td>
+            <td>${glrdNomAff(r.REFERENT)||'—'}</td>
             <td style="color:#E67E22;font-size:12px">${tel}</td>
             <td style="font-size:12px">${accompagnants||'—'}</td>
             <td>${vehicules||'—'}</td>
