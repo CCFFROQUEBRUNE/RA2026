@@ -1919,6 +1919,50 @@ function openReport() {
 let glrdState = {}; // { J1: [{NUM_PS, LIEU_DIT, REFERENT, ACC_1...}], J2: ... }
 let glrdJour  = 'J1';
 
+// ── Bénévoles disponibles PAR JOUR pour le module LA_GAILLARDE ──────────────
+// BENEVOLES / BENEVOLES_LABEL / BENEVOLES_DATA reflètent le jour de la saisie Tous Secteurs (currentJour).
+// Le module LG a son propre sélecteur de jour : ses listes déroulantes doivent suivre glrdJour.
+// glrdBenevCache[jour] = { noms:[NOM ou "NOM Prénom"], label:{nom→libellé}, data:[{nom,label,tel}] }
+const glrdBenevCache = {};
+let refJourCharge = null; // jour auquel correspondent actuellement BENEVOLES / BENEVOLES_DATA
+
+function glrdBenev() {
+  return glrdBenevCache[glrdJour] || { noms: BENEVOLES, label: BENEVOLES_LABEL, data: BENEVOLES_DATA };
+}
+
+// Recherche d'un bénévole (téléphone…) : liste du jour LG d'abord, puis liste TS courante
+function glrdFindBenev(nom) {
+  if (!nom) return null;
+  return glrdBenev().data.find(b => b.nom === nom) || BENEVOLES_DATA.find(b => b.nom === nom) || null;
+}
+
+async function glrdChargerBenevoles(jour) {
+  if (glrdBenevCache[jour]) return true;
+  // Même jour que celui déjà chargé pour Tous Secteurs : on réutilise (copie, car les tableaux sont réécrits au rechargement)
+  if (jour === refJourCharge && BENEVOLES_DATA.length) {
+    glrdBenevCache[jour] = {
+      noms: BENEVOLES.slice(), label: Object.assign({}, BENEVOLES_LABEL),
+      data: BENEVOLES_DATA.map(b => Object.assign({}, b))
+    };
+    return true;
+  }
+  try {
+    const json = await callASRetry({ action: 'getReferentiels', jour });
+    if (!json.ok) throw new Error(json.error);
+    const noms = [], label = {}, data = [];
+    (json.data.benevoles || []).forEach(b => {
+      const nomSeul = b.nomSeul || b.nom.split(' ')[0];
+      noms.push(nomSeul); label[nomSeul] = b.nom;
+      data.push({ nom: nomSeul, label: b.nom, tel: b.tel || '' });
+    });
+    glrdBenevCache[jour] = { noms, label, data };
+    return true;
+  } catch(e) {
+    console.warn('glrd bénévoles ' + jour, e);
+    return false;
+  }
+}
+
 function openGaillarde() {
   // Peupler sélecteur de jours
   const sel = document.getElementById('glrdJourSelect');
@@ -1934,6 +1978,7 @@ function openGaillarde() {
   // (évite d'afficher un cache périmé si des données ont été sauvegardées
   // depuis une autre session ou entre deux ouvertures du panneau)
   delete glrdState[glrdJour];
+  delete glrdBenevCache[glrdJour]; // relire les disponibilités du Sheet
   document.getElementById('glrdOverlay').classList.add('active');
   glrdChargerJour();
 }
@@ -1976,6 +2021,11 @@ async function glrdChargerJour() {
   // Lire le jour depuis le select ; si vide (premier rendu), garder glrdJour déjà fixé
   const selVal = document.getElementById('glrdJourSelect').value;
   if (selVal) glrdJour = selVal;
+  const jourDemande = glrdJour;
+  // Bénévoles disponibles CE jour-là (sinon les listes restent celles du jour Tous Secteurs)
+  const benevOk = await glrdChargerBenevoles(jourDemande);
+  if (jourDemande !== glrdJour) return; // l'utilisateur a changé de jour entre-temps
+  if (!benevOk) glrdToast('⚠ Liste des bénévoles de ' + jourDemande + ' non chargée — vérifiez avant de sélectionner', 'warn');
   if (!glrdState[glrdJour]) {
     // Charger depuis Sheets
     try {
@@ -2011,6 +2061,7 @@ async function glrdChargerJour() {
     } catch(e) {
       glrdState[glrdJour] = [];
     }
+    if (jourDemande !== glrdJour) return;
   }
   glrdRenderSaisie();
 }
@@ -2055,11 +2106,18 @@ function glrdPSOpts(selected) {
 }
 
 function glrdBenvOpts(selected='') {
+  const B = glrdBenev();
+  let orphan = '';
+  // Valeur déjà enregistrée mais non disponible ce jour-là : on la garde visible (sinon elle serait effacée à la sauvegarde)
+  if (selected && !B.noms.includes(selected)) {
+    const lab = BENEVOLES_LABEL[selected] || selected;
+    orphan = `<option value="${selected}" selected>${lab} ⚠ non dispo ce jour</option>`;
+  }
   return '<option value="">—</option>' +
-    BENEVOLES.map(b => {
-      const label = BENEVOLES_LABEL[b] || b;
+    B.noms.map(b => {
+      const label = B.label[b] || b;
       return `<option value="${b}" ${b===selected?'selected':''}>${label}</option>`;
-    }).join('');
+    }).join('') + orphan;
 }
 
 function glrdVehOpts(selected='') {
@@ -2078,7 +2136,7 @@ function glrdRefOpts(selected='') {
   // On cherche aussi dans BENEVOLES_LABEL pour l'affichage enrichi
   return '<option value="">—</option>' +
     REFERANTS.map(r => {
-      const label = BENEVOLES_LABEL[r.nom] || r.nom;
+      const label = glrdBenev().label[r.nom] || BENEVOLES_LABEL[r.nom] || r.nom;
       return `<option value="${r.nom}" ${r.nom===selected?'selected':''}>${label}</option>`;
     }).join('');
 }
@@ -2390,7 +2448,7 @@ function glrdFicheHTML(r, jourInfo) {
   const comms   = [r.COMM_A, r.COMM_B].filter(Boolean); // COMM_C → Report Jx uniquement
 
   const telRef = (REFERANTS.find(rf => rf.nom === r.MEP_PAR)||{}).tel ||
-                 (BENEVOLES_DATA.find(b => b.nom === r.MEP_PAR)||{}).tel || '';
+                 (glrdFindBenev(r.MEP_PAR)||{}).tel || '';
 
   return `
     <div class="glrd-fiche">
@@ -2540,11 +2598,11 @@ function glrdRenderReport() {
         ${rows.map(r => {
           const tel = (() => {
             if (!r.REFERENT) return '';
-            const exact = BENEVOLES_DATA.find(b => b.nom === r.REFERENT);
+            const exact = glrdFindBenev(r.REFERENT);
             if (exact) return exact.tel || '';
             // Fallback : chercher par NOM seul (premier mot)
             const nomSeul = r.REFERENT.split(' ')[0];
-            const approx = BENEVOLES_DATA.find(b => b.nom.startsWith(nomSeul));
+            const approx = glrdBenev().data.find(b => b.nom.startsWith(nomSeul)) || BENEVOLES_DATA.find(b => b.nom.startsWith(nomSeul));
             return approx ? approx.tel || '' : '';
           })();
           const accompagnants = [r.ACC_1,r.ACC_2,r.ACC_3].filter(Boolean).join(', ');
@@ -3097,7 +3155,8 @@ async function loadReferentiels() {
   if (!SHEETS_ENABLED) return;
   try {
     showLoadingBanner('Chargement des référentiels depuis Google Sheets…');
-    const json = await callASRetry({ action: 'getReferentiels', jour: currentJour });
+    const jourChargement = currentJour;
+    const json = await callASRetry({ action: 'getReferentiels', jour: jourChargement });
     if (!json.ok) throw new Error(json.error);
     const d = json.data;
 
@@ -3185,6 +3244,7 @@ async function loadReferentiels() {
       if (d.radioMax.cmv) RADIO_MAX.cmv = d.radioMax.cmv;
     }
 
+    refJourCharge = jourChargement;
     hideLoadingBanner();
     hideRefError();
     // Re-render complet pour que les listes déroulantes (référants, PS, secteurs, véhicules) soient à jour
