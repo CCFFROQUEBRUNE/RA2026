@@ -684,10 +684,11 @@ function afficherFiche(psNum, jourId, d) {
     ` — ${(d.ps || '').replace(/^\d+\s*[-–]\s*/, '')}` +
     `<span class="secteur-badge ${isLG ? 'lg' : 'ts'}">${isLG ? 'LA_GAILLARDE' : d.secteur}</span>`;
 
-  // Courses depuis la réponse
-  if (d.courses && d.courses.length) {
-    d.courses.forEach(c => { COURSES[c.nom] = { jours: c.jours, ps: c.ps, couleur: c.couleur }; });
-  }
+  // Courses depuis la réponse : le serveur a déjà gardé uniquement celles qui passent par CE PS (PS_CONCERNES).
+  // On ne garde ici que celles du jour affiché (le serveur ne renvoie pas la liste des PS de chaque course).
+  const coursesDuPS = (Array.isArray(d.courses) ? d.courses : []).filter(c =>
+    Array.isArray(c.jours) && c.jours.includes(jourId)
+  );
 
   const body = document.getElementById('ficheBody');
   body.innerHTML = '';
@@ -756,10 +757,7 @@ function afficherFiche(psNum, jourId, d) {
     </div>`);
 
   // ── Card 5 : Courses & Distances ─────────────────────────────────────────
-  const coursesCeJour = Object.entries(COURSES).filter(([,c]) =>
-    Array.isArray(c.jours) && c.jours.includes(jourId) &&
-    Array.isArray(c.ps) && c.ps.includes(psNum)
-  );
+  const coursesCeJour = coursesDuPS.map(c => [c.nom, { couleur: c.couleur || '#8B5CF6' }]);
   const kmR = d.kmRavit || ''; const kmA = d.kmAtelier || '';
   body.insertAdjacentHTML('beforeend', `
     <div class="fiche-card">
