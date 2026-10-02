@@ -2045,15 +2045,29 @@ async function glrdChargerJour() {
         // depuis le numéro seul "33" stocké dans Sheets (après correction saveSaisieGaillarde)
         // Le select PS utilise le libellé complet comme value → nécessaire pour la sélection
         const psList = PS_SECTEUR['LA_GAILLARDE'] || [];
-        function numPsToLibelle(numStr) {
+        function numPsToLibelle(numStr, lieuDit) {
           if (!numStr) return '';
-          const num = String(numStr).trim();
+          let num = String(numStr).trim();
+          // « 30 BIS » éventuellement présent dans NUM_PS, ou BIS resté en tête du lieu-dit (« BIS - Dessus Banc »)
+          // à cause de l'ancien découpage « 30 BIS - … » → NUM_PS « 30 » + LIEU_DIT « BIS - … »
+          let isBis = /^BIS\b/i.test(String(lieuDit || '').trim());
+          const mBis = num.match(/^(\d+)\s*BIS$/i);
+          if (mBis) { num = mBis[1]; isBis = true; }
+          if (/^\d+$/.test(num)) {
+            if (isBis) {
+              const fb = psList.find(p => new RegExp('^' + num + '\\s*BIS(?![A-Za-z0-9])', 'i').test(p));
+              if (fb) return fb;
+            }
+            // numéro exact, hors « BIS » (« 30 - … » ou « 30 »)
+            const fe = psList.find(p => new RegExp('^' + num + '(?!\\d)\\s*(-|$)').test(p));
+            if (fe) return fe;
+          }
           const found = psList.find(p => p.startsWith(num + ' ') || p.startsWith(num + '-') || p === num);
           return found || num; // fallback : numéro seul si non trouvé dans PS_SECTEUR
         }
 
         glrdState[glrdJour] = json.data.map(r => ({
-          NUM_PS: numPsToLibelle(r.NUM_PS), // "33" → "33 - Impasse des Celtes"
+          NUM_PS: numPsToLibelle(r.NUM_PS, r.LIEU_DIT), // "33" → "33 - Impasse des Celtes" ; « 30 » + « BIS - … » → « 30 BIS - … »
           LIEU_DIT: r.LIEU_DIT||'',
           REFERENT: r.REFERENT||'', ACC_1: r.ACC_1||'', ACC_2: r.ACC_2||'', ACC_3: r.ACC_3||'',
           VEH_A: r.VEH_A||'', VEH_B: r.VEH_B||'',
