@@ -566,10 +566,15 @@ async function accederParPS() {
   btn.textContent = '⏳'; btn.disabled = true;
   showLoader('Recherche PS ' + psVal + ' — ' + (SOURCE === 'lg' ? 'LA_GAILLARDE' : 'Tous Secteurs') + '…');
   try {
-    const json = await callASRetry({ action:'getFichePS', ps:psVal, jour:JOUR_COURANT, source:SOURCE });
+    const json = await callASRetry({ action:'getFichePS', ps:psVal, jour:JOUR_COURANT, source:SOURCE, multi:1 });
     if (!json.ok) throw new Error(json.error || 'Erreur inconnue');
     if (!json.data) {
       errEl.textContent = `PS ${psVal} non trouvé — ${SOURCE === 'lg' ? 'LA_GAILLARDE' : 'Tous Secteurs'} — ${JOUR_COURANT}`;
+      return;
+    }
+    // Plusieurs lignes pour ce numéro ce jour-là (ex. 30 et 30 BIS) : l'utilisateur choisit son point
+    if (Array.isArray(json.data.choix)) {
+      afficherChoix(json.data.choix, 'Plusieurs points signaleurs pour le n° ' + psVal + ' — choisissez le vôtre :');
       return;
     }
     showLoader('Affichage de la fiche…');
@@ -630,8 +635,8 @@ async function chargerFicheDepuisResult(r) {
   document.getElementById('screenChoix').style.display = 'none';
   showLoader('Chargement fiche PS ' + psNum + '…');
   try {
-    const json = await callASRetry({ action:'getFichePS', ps:psNum, jour:JOUR_COURANT, source:'ts' });
-    if (json.ok && json.data) {
+    const json = await callASRetry({ action:'getFichePS', ps:psNum, jour:JOUR_COURANT, source:(r.source === 'lg' ? 'lg' : 'ts'), cle:(r.cle || '') });
+    if (json.ok && json.data && !Array.isArray(json.data.choix)) {
       afficherFiche(psNum, JOUR_COURANT, json.data);
     } else {
       document.getElementById('screenLogin').style.display = 'flex';
@@ -648,10 +653,10 @@ async function chargerFicheDepuisResult(r) {
 }
 
 // Écran de choix (plusieurs résultats Par Nom)
-function afficherChoix(results) {
+function afficherChoix(results, intro) {
   const jourInfo = JOURS.find(j => j.id === JOUR_COURANT);
   document.getElementById('choixLabel').textContent =
-    `${results.length} affectation(s) trouvée(s) — ${jourInfo.label} :`;
+    intro ? `${intro} (${jourInfo.label})` : `${results.length} affectation(s) trouvée(s) — ${jourInfo.label} :`;
   window._choixResults = results;
   document.getElementById('choixCards').innerHTML = results.map((r, i) => `
     <div onclick="chargerFicheDepuisResult(window._choixResults[${i}])"
@@ -660,10 +665,10 @@ function afficherChoix(results) {
       onmouseover="this.style.borderColor='#E74C3C'"
       onmouseout="this.style.borderColor='rgba(255,255,255,0.1)'">
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--texte)">
-        PS ${r.ps} — ${r.lieudit || ''}
+        PS ${r.ps}${r.lieudit ? ' — ' + r.lieudit : ''}
       </div>
       <div style="font-size:12px;color:var(--texte2);margin-top:4px">
-        ${r.nomComplet || r.nom || ''} · ${r.secteur || ''}
+        ${[r.nomComplet || r.nom || '', r.secteur || ''].filter(Boolean).join(' · ')}
       </div>
     </div>`).join('');
   document.getElementById('screenLogin').style.display = 'none';
@@ -679,9 +684,10 @@ function afficherFiche(psNum, jourId, d) {
   // Header
   document.getElementById('ficheJourChip').textContent  = jour.label;
   document.getElementById('ficheDateChip').textContent  = jour.date;
+  const mBis = String(d.ps || '').match(/^(\d+\s*BIS)\s*[-–]\s*(.*)$/i);   // « 30 BIS - Dessus Banc »
   document.getElementById('fichePSTitre').innerHTML =
-    `PS <span style="color:var(--rouge-vif)">${psNum}</span>` +
-    ` — ${(d.ps || '').replace(/^\d+\s*[-–]\s*/, '')}` +
+    `PS <span style="color:var(--rouge-vif)">${mBis ? mBis[1].toUpperCase() : psNum}</span>` +
+    ` — ${mBis ? mBis[2] : (d.ps || '').replace(/^\d+\s*[-–]\s*/, '')}` +
     `<span class="secteur-badge ${isLG ? 'lg' : 'ts'}">${isLG ? 'LA_GAILLARDE' : d.secteur}</span>`;
 
   // Courses depuis la réponse : le serveur a déjà gardé uniquement celles qui passent par CE PS (PS_CONCERNES).
