@@ -759,10 +759,14 @@ function afficherFiche(psNum, jourId, d) {
   // ── Card 5 : Courses & Distances ─────────────────────────────────────────
   const coursesCeJour = coursesDuPS.map(c => [c.nom, { couleur: c.couleur || '#8B5CF6' }]);
   const kmR = d.kmRavit || ''; const kmA = d.kmAtelier || '';
+  // Distance numérique → « 10 km » ; texte libre (ex. « Au dessus du S40 ») → affiché tel quel, sans « km »
+  const fmtKm = v => /^[\d\s.,]+$/.test(String(v)) ? v + ' km' : String(v);
+  const premierPart = d.premierPart || '';
   body.insertAdjacentHTML('beforeend', `
     <div class="fiche-card">
       <div class="fiche-card-header"><span class="card-icon">🏁</span><span class="card-title">Courses & Distances</span></div>
       <div class="fiche-card-body">
+        ${premierPart ? `<div class="info-row">${rowInner('Passage du 1er participant','<span class="info-val highlight">'+premierPart+'</span>')}</div>` : ''}
         ${coursesCeJour.length
           ? coursesCeJour.map(([nom,c]) => `<div class="course-item">
               <div class="course-dot" style="background:${c.couleur}"></div>
@@ -770,9 +774,9 @@ function afficherFiche(psNum, jourId, d) {
               <span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;background:${c.couleur};color:#fff;border-radius:3px;padding:1px 7px">CE JOUR</span>
             </div>`).join('')
           : `<div style="color:var(--texte2);font-size:13px;padding:4px 0">Aucune course ce jour à ce PS</div>`}
-        ${kmR ? `<div class="info-row" style="margin-top:8px">${rowInner('Km ravitaillement','<span class="info-val highlight">'+kmR+' km</span>')}</div>` : ''}
-        ${kmA ? `<div class="info-row">${rowInner('Km atelier','<span class="info-val highlight">'+kmA+' km</span>')}</div>` : ''}
-        ${!coursesCeJour.length && !kmR && !kmA ? `<div style="color:var(--texte2);font-size:12px;margin-top:6px;font-style:italic">Distances Orga non encore disponibles</div>` : ''}
+        ${kmR ? `<div class="info-row" style="margin-top:8px">${rowInner('Km ravitaillement','<span class="info-val highlight">'+fmtKm(kmR)+'</span>')}</div>` : ''}
+        ${kmA ? `<div class="info-row">${rowInner('Km atelier','<span class="info-val highlight">'+fmtKm(kmA)+'</span>')}</div>` : ''}
+        ${!coursesCeJour.length && !kmR && !kmA && !premierPart ? `<div style="color:var(--texte2);font-size:12px;margin-top:6px;font-style:italic">Distances Orga non encore disponibles</div>` : ''}
       </div>
     </div>`);
 
