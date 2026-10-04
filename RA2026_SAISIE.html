@@ -309,6 +309,13 @@
     border-color: var(--orange) !important;
     background: rgba(230,126,34,0.12) !important;
   }
+  .conflict-ps select {
+    border-color: #E74C3C !important;
+    background: rgba(192,57,43,0.22) !important;
+  }
+  .secteur-bloc.solo .btn-add-ps, .secteur-bloc.solo .secteur-actions .btn-sm.success { display: none !important; }
+  .secteur-bloc.solo .secteur-num { background: #8E44AD; }
+  .chk-tous { font-size: 11px; color: var(--texte2); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
   .conflict-veh input, .conflict-veh select {
     border-color: #E74C3C !important;
     background: rgba(192,57,43,0.18) !important;
@@ -536,7 +543,7 @@
   @media print {
     /* Par défaut : tout masqué sauf contenu normal */
     header, .date-bar, .stats-bar, .secteur-actions,
-    .btn-add-ps, .btn-del-row, .courses-overlay { display: none !important; }
+    .btn-add-ps, .btn-del-row, .courses-overlay, .no-print-report { display: none !important; }
     #reportOverlay, #ficheSectOverlay { display: none !important; }
     body { background: #fff; color: #000; }
     .secteur-header { background: #eee; }
@@ -1036,6 +1043,7 @@
       <div class="jour-selector" id="jourSelector"></div>
       <span class="badge-conflicts" id="badgeConflicts">⚠ Conflits</span>
       <button class="btn-action btn-add-secteur" onclick="addSecteur()">+ Secteur</button>
+      <label class="chk-tous" title="Afficher aussi les secteurs non activés ce jour dans REF_Secteurs"><input type="checkbox" id="chkTousSecteurs" onchange="toggleTousSecteurs(this.checked)"> tous les secteurs</label>
       <button class="btn-action" style="background:#B7950B;color:#fff" onclick="openGaillarde()">🏔 LA_GAILLARDE</button>
       <button class="btn-action" style="background:#6C3483;color:#fff" onclick="openCourses()">🏁 Courses</button>
       <button class="btn-action" style="background:#E67E22;color:#fff" onclick="openFicheSecteur()">📄 Fiche Secteur</button>
@@ -1217,14 +1225,14 @@ const COURSES = {
 // getCoursesForPS(psStr, jourId) → ['Enduro 40 Kms', ...]
 function getCoursesForPS(psStr, jourId) {
   // extrait le numéro depuis "31 - Barrières..." ou "31" ou "171&172..."
-  const nums = (psStr || '').match(/\d+/g);
-  if (!nums) return [];
+  const nums = numsDuPS(psStr);   // numéros du libellé seulement (les chiffres du nom, ex. « RAG 6 », sont ignorés)
+  if (!nums.length) return [];
   const found = [];
   Object.entries(COURSES).forEach(([name, c]) => {
     if (!Array.isArray(c.jours) || !c.jours.includes(jourId)) return;
     if (!Array.isArray(c.ps)) return;
     nums.forEach(n => {
-      if (c.ps.includes(parseInt(n)) && !found.includes(name)) found.push(name);
+      if (c.ps.includes(n) && !found.includes(name)) found.push(name);
     });
   });
   return found;
@@ -1334,6 +1342,141 @@ function buildSelect(options, selected, placeholder, cls) {
   return html;
 }
 
+// ========================================================
+// SECTEURS / PS SOUPLES (v20) — Tous Secteurs uniquement. Le module LA_GAILLARDE n'utilise rien de ce bloc.
+// ========================================================
+const SECTEURS_JOURS = {};   // nom secteur → null (actif tous les jours) ou ['J2','J3',…] (colonnes J1–J5 de REF_Secteurs)
+let   SECTEURS_TOUS  = false; // case « tous les secteurs » : ignore l'activation par jour
+const PS_TOUS        = [];   // [{label, secteur}] — PS du jour hors LA_GAILLARDE (groupe « Autres PS »)
+const SOLO_VIDE      = 'PS ?';
+const attrEsc  = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const normTxt  = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+const normCle  = v => normTxt(v).toUpperCase();
+const estSolo  = nom => /^PS(\s|$)/i.test(String(nom || ''));          // bloc « PS sans secteur » (nommé « PS 140 »)
+const secteurActif = (nom, jour) => { const j = SECTEURS_JOURS[nom]; return !j || j.includes(jour); };
+
+// Numéros couverts par un libellé de PS (même logique que l'Apps Script).
+// « 128 - 124 127 & 127 - LA DOMI » → 128,124,127 ; « 131 a 139 » → 131…139 ; le « 3 » de « 120 - 3 CHEMINS » est ignoré.
+function parsePS(label) {
+  const out = [];
+  const add = (n, bis) => { n = parseInt(n, 10); if (n > 0 && !out.some(o => o.n === n && o.bis === bis)) out.push({ n, bis }); };
+  const segs = normTxt(label).split(/\s[-–]\s/);
+  const num  = seg => /^(?:\d+|&|\+|à|a|bis|,)(?: (?:\d+|&|\+|à|a|bis|,))*$/i.test(seg.trim());
+  let prefix = '';
+  for (let i = 0; i < segs.length; i++) {
+    if (i === 0 ? (/^\d/.test(segs[i]) && num(segs[i])) : num(segs[i])) prefix += ' ' + segs[i]; else break;
+  }
+  prefix = prefix.replace(/(\d+)\s+(?:à|a)\s+(\d+)/gi, (m, a, b) => {
+    for (let k = parseInt(a, 10); k <= parseInt(b, 10) && k < parseInt(a, 10) + 60; k++) add(k, false);
+    return ' ';
+  });
+  const re = /(\d+)(?:\s+(bis))?/gi; let m;
+  while ((m = re.exec(prefix))) add(m[1], !!m[2]);
+  if (!out.length) { const f = String(label || '').match(/\d+/); if (f) add(f[0], false); }
+  return out;
+}
+const numsDuPS = label => [...new Set(parsePS(label).map(o => o.n))];
+const clesPS   = label => parsePS(label).map(o => o.n + (o.bis ? 'BIS' : ''));
+// PS 30 à 41 = module LA_GAILLARDE uniquement
+const estPSLG  = label => { const p = parsePS(label)[0]; return !!p && p.n >= 30 && p.n <= 41; };
+// « 117 BIS - INTERSECTION… » → « PS 117 BIS »
+const soloNom  = label => 'PS ' + normTxt(String(label || '').split(/\s[-–]\s/)[0]);
+
+// Liste des PS d'un secteur (clé exacte, sinon comparaison sans casse ni espaces superflus)
+function psDuSecteur(nom) {
+  if (PS_SECTEUR[nom]) return PS_SECTEUR[nom];
+  const k = normCle(nom);
+  const key = Object.keys(PS_SECTEUR).find(x => normCle(x) === k);
+  return key ? PS_SECTEUR[key] : [];
+}
+// PS déjà saisis ce jour : libellé → secteur (en excluant la ligne en cours d'édition)
+function psUtilises(exSi, exRi) {
+  const m = {};
+  (state[currentJour] || []).forEach((sec, si) => (sec.rows || []).forEach((r, ri) => {
+    if (!r.ps || (si === exSi && ri === exRi)) return;
+    if (!m[r.ps]) m[r.ps] = sec.secteur;
+  }));
+  return m;
+}
+function psOptionsHtml(secteur, selected, si, ri) {
+  const own  = psDuSecteur(secteur);
+  const used = psUtilises(si, ri);
+  const mk   = lab => used[lab] ? ` ⚠ déjà saisi (${used[lab]})` : '';
+  const solo = estSolo(secteur);
+  let h = `<option value="">— choisir PS —</option>`;
+  own.forEach(ps => { h += `<option value="${attrEsc(ps)}" ${ps === selected ? 'selected' : ''}>${ps}${mk(ps)}</option>`; });
+  const ownSet = new Set(own);
+  const autres = PS_TOUS.filter(p => !ownSet.has(p.label));
+  if (autres.length) {
+    h += `<optgroup label="${solo ? 'Tous les PS' : 'Autres PS (hors secteur)'}">`;
+    autres.forEach(p => {
+      h += `<option value="${attrEsc(p.label)}" ${p.label === selected ? 'selected' : ''}>${p.label} · ${p.secteur || 'sans secteur'}${mk(p.label)}</option>`;
+    });
+    h += `</optgroup>`;
+  }
+  h += `<option value="__LIBRE__">✎ PS non listé… (saisir)</option>`;
+  if (selected && !ownSet.has(selected) && !autres.some(p => p.label === selected)) {
+    h += `<option value="${attrEsc(selected)}" selected>${selected} ✎ hors liste</option>`;
+  }
+  return h;
+}
+function sectOptionsHtml(si) {
+  const cur    = state[currentJour][si].secteur;
+  const prises = new Set(state[currentJour].filter((x, i) => i !== si).map(x => x.secteur));
+  const liste  = SECTEURS.filter(n => n !== 'LA_GAILLARDE' && (SECTEURS_TOUS || secteurActif(n, currentJour) || n === cur));
+  let h = liste.map(n => {
+    const dis = prises.has(n) ? 'disabled' : '';
+    const inactif = secteurActif(n, currentJour) ? '' : ' (inactif ce jour)';
+    return `<option value="${attrEsc(n)}" ${n === cur ? 'selected' : ''} ${dis}>${n}${inactif}${prises.has(n) ? ' — déjà ajouté' : ''}</option>`;
+  }).join('');
+  if (cur && !liste.includes(cur)) {
+    h += estSolo(cur) ? `<option value="${attrEsc(cur)}" selected>${cur}</option>`
+                      : `<option value="${attrEsc(cur)}" selected>${cur} ⚠ hors liste</option>`;
+  }
+  h += `<option value="__SOLO__">✚ PS sans secteur (nom = n° du PS)</option>`;
+  return h;
+}
+function toggleTousSecteurs(v) { SECTEURS_TOUS = !!v; renderAll(); }
+// Menus « secteur » de tous les blocs remis à jour (un secteur pris/libéré ailleurs change leurs options grisées)
+function refreshSectSelects() {
+  (state[currentJour] || []).forEach((x, i) => {
+    const sel = document.querySelector(`#sect-${i} .secteur-name-select`);
+    if (sel) sel.innerHTML = sectOptionsHtml(i);
+  });
+}
+function rerenderSecteur(si) { renderSecteur(si); refreshSectSelects(); updateStats(); }
+function refreshRowPS(si, ri) {
+  const tr = document.getElementById(`row-${si}-${ri}`);
+  if (tr) tr.outerHTML = renderPSRow(si, ri, state[currentJour][si].rows[ri], state[currentJour][si].secteur);
+}
+// Changement du PS d'une ligne : PS non listé, bloc « PS sans secteur » nommé d'après le PS
+function onPSChange(si, ri, sel) {
+  const sec = state[currentJour][si];
+  const row = sec.rows[ri];
+  let v = sel.value;
+  if (v === '__LIBRE__') {
+    v = normTxt(prompt('PS non listé — saisir le libellé complet en commençant par le numéro.\nEx. : 145 BIS - NOM DU LIEU', ''));
+    if (!v) { refreshRowPS(si, ri); return; }
+    if (!/^\d/.test(v)) { toast('Le libellé doit commencer par le numéro du PS', 'warn'); refreshRowPS(si, ri); return; }
+    if (estPSLG(v))     { toast('PS 30 à 41 : réservés au module LA_GAILLARDE', 'err'); refreshRowPS(si, ri); return; }
+  }
+  if (estSolo(sec.secteur)) {
+    const autres = state[currentJour].filter((x, i) => i !== si).map(x => x.secteur);
+    const nom = v ? soloNom(v) : SOLO_VIDE;
+    if (v && autres.includes(nom)) { toast(`${nom} est déjà saisi dans un autre bloc ce jour`, 'warn'); refreshRowPS(si, ri); return; }
+    row.ps = v;
+    if (nom === SOLO_VIDE && autres.includes(SOLO_VIDE)) { refreshRowPS(si, ri); updateStats(); checkConflicts(); return; }
+    sec.secteur = nom;
+    rerenderSecteur(si);
+    if (v) toast(`Bloc nommé « ${nom} »`);
+    checkConflicts();
+    return;
+  }
+  row.ps = v;
+  if (sel.value === '__LIBRE__') refreshRowPS(si, ri); else refreshCoursePills(si, ri, v);
+  updateStats(); checkConflicts();
+}
+
 function buildPSOptions(secteur, selected) {
   const list = PS_SECTEUR[secteur] || [];
   let html = `<select class="ps-select" style="width:100%"><option value="">— choisir PS —</option>`;
@@ -1372,7 +1515,7 @@ function renderSecteur(si) {
   const collapsed = s.collapsed ? 'collapsed' : '';
 
   const div = document.createElement('div');
-  div.className = `secteur-bloc ${collapsed}`;
+  div.className = `secteur-bloc ${collapsed}${estSolo(s.secteur) ? ' solo' : ''}`;
   div.id = `sect-${si}`;
 
   // build PS table rows
@@ -1382,9 +1525,7 @@ function renderSecteur(si) {
   });
 
   // secteur name options
-  let sectOpts = SECTEURS.map(sec =>
-    `<option value="${sec}" ${sec === s.secteur ? 'selected' : ''}>${sec}</option>`
-  ).join('') + orphanOpt(SECTEURS, s.secteur);
+  let sectOpts = sectOptionsHtml(si);
 
   // referant options — value = NOM seul, texte = NOM+PRENOM si dispo
   let refOpts = `<option value="">— Référant —</option>` + REFERANTS.map(r => {
@@ -1464,7 +1605,8 @@ function renderSecteur(si) {
       </div>
     </div>
   `;
-  container.appendChild(div);
+  const ancien = document.getElementById(`sect-${si}`);
+  if (ancien && ancien.parentNode === container) container.replaceChild(div, ancien); else container.appendChild(div);
 }
 
 function renderPSRow(si, ri, row, secteur) {
@@ -1482,19 +1624,13 @@ function renderPSRow(si, ri, row, secteur) {
   ).join('');
 
   // PS select
-  const psList = PS_SECTEUR[secteur] || [];
-  let psOpts = `<option value="">— choisir PS —</option>` + psList.map(ps =>
-    `<option value="${ps}" ${ps === row.ps ? 'selected' : ''}>${ps}</option>`
-  ).join('');
-  if (row.ps && !psList.includes(row.ps)) {
-    psOpts += `<option value="${row.ps}" selected>${row.ps}</option>`;
-  }
+  const psOpts = psOptionsHtml(secteur, row.ps, si, ri);
 
   return `
     <tr id="row-${si}-${ri}" data-si="${si}" data-ri="${ri}">
       <td class="col-num">${ri + 1}</td>
       <td class="col-ps">
-        <select onchange="updateRow(${si},${ri},'ps',this.value); refreshCoursePills(${si},${ri},this.value);" class="ps-select">
+        <select onchange="onPSChange(${si},${ri},this)" class="ps-select">
           ${psOpts}
         </select>
       </td>
@@ -1570,8 +1706,14 @@ function addSecteur() {
     toast('Liste des secteurs non chargée depuis Sheets — utilisez « Réessayer »', 'err');
     return;
   }
+  const prises = new Set(state[currentJour].map(x => x.secteur));
+  const dispo  = SECTEURS.filter(n => n !== 'LA_GAILLARDE' && !prises.has(n) && (SECTEURS_TOUS || secteurActif(n, currentJour)));
+  if (!dispo.length) {
+    toast('Aucun secteur actif disponible — cochez « tous les secteurs » ou choisissez « PS sans secteur »', 'warn');
+    return;
+  }
   state[currentJour].push({
-    secteur: SECTEURS[0], referant: '', hmepSect: '6h00', collapsed: false,
+    secteur: dispo[0], referant: '', hmepSect: '6h00', collapsed: false,
     commentaires: ['','',''],
     rows: [emptyRow()]
   });
@@ -1598,15 +1740,21 @@ function toggleCollapse(si, e) {
 }
 
 function changeSecteur(si, val) {
-  state[currentJour][si].secteur = val;
-  // update commentaires label
-  const lbl = document.getElementById(`comm-label-${si}`);
-  if (lbl) lbl.innerHTML = `📝 Commentaires pour le référant <strong>${val}</strong>`;
-  // re-render only that secteur's rows to update PS dropdowns
-  const tbody = document.getElementById(`rows-${si}`);
-  tbody.innerHTML = state[currentJour][si].rows.map((r, ri) =>
-    renderPSRow(si, ri, r, val)
-  ).join('');
+  const sec    = state[currentJour][si];
+  const autres = state[currentJour].filter((x, i) => i !== si).map(x => x.secteur);
+  if (val === '__SOLO__') {
+    const premier = (sec.rows || []).find(r => r.ps);
+    val = premier ? soloNom(premier.ps) : SOLO_VIDE;
+    if (autres.includes(val)) {
+      toast(val === SOLO_VIDE ? 'Un bloc « PS sans secteur » attend déjà son PS : choisissez-le d\'abord' : `${val} est déjà saisi dans un autre bloc ce jour`, 'warn');
+      rerenderSecteur(si); return;
+    }
+  } else if (autres.includes(val)) {
+    toast(`Le secteur ${val} est déjà ajouté ce jour`, 'warn');
+    rerenderSecteur(si); return;
+  }
+  sec.secteur = val;
+  rerenderSecteur(si);   // reconstruit le bloc : menus PS (liste du secteur + « Autres PS »), libellé des commentaires, mode « PS sans secteur »
   checkConflicts();
 }
 
@@ -1621,6 +1769,7 @@ function changeHmepSect(si, val) {
 }
 
 function addPS(si) {
+  if (estSolo(state[currentJour][si].secteur)) { toast('Un bloc « PS sans secteur » ne contient qu\'un PS — ajoutez un autre bloc', 'warn'); return; }
   state[currentJour][si].rows.push(emptyRow());
   const ri = state[currentJour][si].rows.length - 1;
   const tbody = document.getElementById(`rows-${si}`);
@@ -1664,16 +1813,16 @@ function emptyRow() {
 // ========================================================
 function updateStats() {
   const sects = state[currentJour] || [];
-  let ps = 0, benv = 0, veh = new Set();
+  const psSet = new Set(); let benv = 0, veh = new Set();
   sects.forEach(s => {
     s.rows.forEach(r => {
-      if (r.ps) ps++;
+      if (r.ps) psSet.add(r.ps);
       ['b1','b2','b3','b4','b5'].forEach(k => { if (r[k]) benv++; });
       if (r.vehA) veh.add(r.vehA);
       if (r.vehB) veh.add(r.vehB);
     });
   });
-  document.getElementById('statPS').textContent = ps;
+  document.getElementById('statPS').textContent = psSet.size;
   document.getElementById('statBenv').textContent = benv;
   document.getElementById('statVeh').textContent = veh.size;
 }
@@ -1749,8 +1898,45 @@ function checkConflicts() {
     });
   });
 
+  // --- PS saisi plusieurs fois le même jour (même libellé, ou numéro commun : « 118 119 120 & 121 » + « 120 ») ---
+  document.querySelectorAll('.conflict-ps').forEach(el => el.classList.remove('conflict-ps'));
+  const psItems = [];
+  sects.forEach((sec, si) => sec.rows.forEach((r, ri) => {
+    if (r.ps) psItems.push({ si, ri, label: r.ps, cles: clesPS(r.ps), secteur: sec.secteur });
+  }));
+  const psMsgs = [], psFlag = new Set();
+  const parLabel = {};
+  psItems.forEach(it => { (parLabel[it.label] = parLabel[it.label] || []).push(it); });
+  Object.entries(parLabel).forEach(([lab, arr]) => {
+    if (arr.length > 1) {
+      arr.forEach(it => psFlag.add(it.si + '-' + it.ri));
+      psMsgs.push(`PS <strong>${lab}</strong> saisi <strong>${arr.length}×</strong> (${arr.map(a => a.secteur).join(' / ')})`);
+    }
+  });
+  for (let a = 0; a < psItems.length; a++) {
+    for (let b = a + 1; b < psItems.length; b++) {
+      const A = psItems[a], B = psItems[b];
+      if (A.label === B.label) continue;
+      const commun = A.cles.filter(k => B.cles.includes(k));
+      if (commun.length) {
+        psFlag.add(A.si + '-' + A.ri); psFlag.add(B.si + '-' + B.ri);
+        psMsgs.push(`N° <strong>${commun.join(', ').replace(/BIS/g, ' BIS')}</strong> présent dans 2 lignes : « ${A.label} » (${A.secteur}) et « ${B.label} » (${B.secteur})`);
+      }
+    }
+  }
+  psFlag.forEach(k => { const td = document.querySelector(`#row-${k} td.col-ps`); if (td) td.classList.add('conflict-ps'); });
+
   // --- Build alerts bar ---
   const alerts = [];
+
+  // PS en double (limité à 6 messages)
+  psMsgs.slice(0, 6).forEach(m => {
+    alerts.push(`<div class="alert-item veh-double">
+        <span class="alert-icon">📍</span>
+        <span class="alert-text">${m} — vérifier l'affectation</span>
+      </div>`);
+  });
+  if (psMsgs.length > 6) alerts.push(`<div class="alert-item veh-double"><span class="alert-icon">📍</span><span class="alert-text">… et ${psMsgs.length - 6} autre(s) PS en double</span></div>`);
 
   // A5-2 : radio over-limit
   ['com','crs','cmv'].forEach(t => {
@@ -1810,17 +1996,30 @@ function openReport() {
   const sects = state[jourId] || [];
 
   // Totaux globaux Jx
-  let gtPS=0, gtBenv=0, gtCOM=0, gtCRS=0, gtCMV=0;
-  const gtVehs = new Set();
+  let gtBenv=0, gtCOM=0, gtCRS=0, gtCMV=0;
+  const gtVehs = new Set(), gtPSSet = new Set();
   sects.forEach(s => s.rows.forEach(r => {
-    if (!r.ps) return; gtPS++;
+    if (!r.ps) return; gtPSSet.add(r.ps);
     [r.b1,r.b2,r.b3,r.b4,r.b5].forEach(b => { if(b) gtBenv++; });
     if(r.vehA) gtVehs.add(r.vehA); if(r.vehB) gtVehs.add(r.vehB);
     gtCOM += (r.com||0); gtCRS += (r.crs||0); gtCMV += (r.cmv||0);
   }));
 
+  const gtPS = gtPSSet.size;
+
+  // Contrôle (non imprimé) : secteurs activés ce jour dans REF_Secteurs mais sans aucun PS saisi
+  let avertSect = '';
+  if (SECTEURS.some(n => SECTEURS_JOURS[n])) {
+    const saisis = new Set(sects.filter(x => x.rows.some(r => r.ps)).map(x => x.secteur));
+    const manquants = SECTEURS.filter(n => n !== 'LA_GAILLARDE' && secteurActif(n, jourId) && !saisis.has(n));
+    if (manquants.length) {
+      avertSect = `<div class="no-print-report" style="background:rgba(230,126,34,.15);border:1px solid #E67E22;color:#E67E22;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px">
+        ⚠ Secteurs actifs ce jour <strong>sans aucun PS saisi</strong> : ${manquants.join(', ')} <span style="opacity:.7">(ce message n'est pas imprimé)</span></div>`;
+    }
+  }
+
   // En-tête global
-  body.insertAdjacentHTML('beforeend', `
+  body.insertAdjacentHTML('beforeend', avertSect + `
     <div class="fs-titre" style="margin-bottom:4px">REPORT JOURNALIER — ${jourId}</div>
     <div class="fs-sous-titre">${dateInfo.date} — ${sects.length} secteur(s)</div>
     <div class="fs-section">
@@ -3220,6 +3419,11 @@ async function loadReferentiels() {
     if (!listeSect.length) throw new Error('REF_Secteurs vide ou illisible');
     if (!listeVeh.length)  throw new Error('REF_Vehicules vide ou illisible');
     SECTEURS.length = 0;  listeSect.forEach(v => SECTEURS.push(v));
+    // Activation par jour (colonnes J1–J5 de REF_Secteurs) : null = actif tous les jours
+    Object.keys(SECTEURS_JOURS).forEach(k => delete SECTEURS_JOURS[k]);
+    (d.secteurs || []).forEach(x => {
+      if (x && typeof x === 'object') SECTEURS_JOURS[String(x.nom).trim()] = Array.isArray(x.jours) ? x.jours : null;
+    });
     VEHICULES.length = 0; listeVeh.forEach(v => VEHICULES.push(v));
 
     // Référants : depuis REF_Referents (d.referants) si disponible, sinon depuis secteurs
@@ -3240,10 +3444,23 @@ async function loadReferentiels() {
       // Sauvegarder LA_GAILLARDE avant effacement (peut ne pas être dans REF_PS)
       const glrdPS = PS_SECTEUR['LA_GAILLARDE'] ? [...PS_SECTEUR['LA_GAILLARDE']] : [];
       Object.keys(PS_SECTEUR).forEach(k => delete PS_SECTEUR[k]);
+      PS_TOUS.length = 0;
+      const deja = new Set();
       d.ps.forEach(p => {
-        if (!PS_SECTEUR[p.secteur]) PS_SECTEUR[p.secteur] = [];
-        PS_SECTEUR[p.secteur].push(`${p.num} - ${p.lieudit}`);
+        // p.label est fourni par l'Apps Script (« N° - Nom », ou « N° » si le PS n'a pas encore de nom)
+        const label = p.label || `${p.num} - ${p.lieudit}`;
+        if (p.secteur) {
+          if (!PS_SECTEUR[p.secteur]) PS_SECTEUR[p.secteur] = [];
+          // LA_GAILLARDE : liste reprise telle quelle (aucun dédoublonnage) ; autres secteurs : doublons exacts ignorés
+          if (p.secteur === 'LA_GAILLARDE' || !PS_SECTEUR[p.secteur].includes(label)) PS_SECTEUR[p.secteur].push(label);
+        }
+        // « Autres PS » : tous les PS du jour sauf LA_GAILLARDE et les n° 30 à 41 (réservés au module LG)
+        if (normCle(p.secteur) !== 'LA_GAILLARDE' && !estPSLG(label) && !deja.has(label)) {
+          deja.add(label);
+          PS_TOUS.push({ label, secteur: normTxt(p.secteur) });
+        }
       });
+      PS_TOUS.sort((a, b) => ((parsePS(a.label)[0] || {}).n || 0) - ((parsePS(b.label)[0] || {}).n || 0) || a.label.localeCompare(b.label, 'fr'));
       // Restaurer LA_GAILLARDE si non fournie par Sheets
       if (!PS_SECTEUR['LA_GAILLARDE'] && glrdPS.length) {
         PS_SECTEUR['LA_GAILLARDE'] = glrdPS;
@@ -3477,12 +3694,12 @@ function openCourses() {
 
     const psTags = c.ps.map(num => {
       // find matching PS string in PS_SECTEUR
-      const allPS = Object.values(PS_SECTEUR).flat();
+      const allPS = [...Object.values(PS_SECTEUR).flat(), ...PS_TOUS.map(p => p.label)];
       const match = allPS.find(s => s.startsWith(num + ' ') || s.startsWith(num + '&') || s === String(num));
       const label = match || String(num);
       const isAssigned = [...assignedPS].some(s => {
-        const nums = (s || '').match(/\d+/g);
-        return nums && nums.map(Number).includes(num);
+        const nums = numsDuPS(s);
+        return nums.length && nums.includes(num);
       });
       return `<span class="course-ps-item ${isAssigned ? 'assigned' : ''}">${label}</span>`;
     }).join('');
@@ -3490,8 +3707,8 @@ function openCourses() {
     const totalPS = c.ps.length;
     const coveredPS = c.ps.filter(num => {
       return [...assignedPS].some(s => {
-        const nums = (s || '').match(/\d+/g);
-        return nums && nums.map(Number).includes(num);
+        const nums = numsDuPS(s);
+        return nums.length && nums.includes(num);
       });
     }).length;
 
