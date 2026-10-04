@@ -309,6 +309,11 @@
     border-color: var(--orange) !important;
     background: rgba(230,126,34,0.12) !important;
   }
+  .course-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+  .course-pill.manuelle { cursor: default; }
+  .course-pill .course-x { margin-left: 4px; cursor: pointer; font-weight: 700; opacity: .75; }
+  .course-pill .course-x:hover { opacity: 1; }
+  .course-add { max-width: 88px; font-size: 10px; padding: 1px 2px; background: transparent; color: var(--texte2); border: 1px dashed var(--texte2); border-radius: 3px; cursor: pointer; }
   .conflict-ps select {
     border-color: #E74C3C !important;
     background: rgba(192,57,43,0.22) !important;
@@ -1684,7 +1689,7 @@ function renderPSRow(si, ri, row, secteur) {
           oninput="updateRow(${si},${ri},'obs',this.value)">
       </td>
       <td class="col-course" id="course-${si}-${ri}">
-        ${renderCoursePills(row.ps, currentJour)}
+        ${renderCoursesCell(si, ri, row)}
       </td>
       <td class="col-del">
         <button class="btn-del-row" onclick="deleteRow(${si},${ri})" title="Supprimer">✕</button>
@@ -1805,7 +1810,7 @@ function updateCommentaire(si, ci, val) {
 
 function emptyRow() {
   return { ps:'', hmep:'', vehA:'', vehB:'', b1:'', b2:'', b3:'', b4:'', b5:'',
-           com:0, crs:0, cmv:0, obs:'' };
+           com:0, crs:0, cmv:0, obs:'', courses:[] };
 }
 
 // ========================================================
@@ -2089,7 +2094,7 @@ function openReport() {
           r.crs ? `<span class="fs-radio-pill crs">${r.crs} CRS</span>` : '',
           r.cmv ? `<span class="fs-radio-pill cmv">${r.cmv} CMV</span>` : '',
         ].join('');
-        const courses = renderCoursePills(r.ps, jourId) || '—';
+        const courses = renderCoursePillsRow(r, jourId);
         html += `<tr>
           <td><strong>${r.ps}</strong></td>
           <td><strong style="color:#C0392B">${r.hmep||'—'}</strong></td>
@@ -3174,11 +3179,8 @@ function renderFicheSecteur() {
   });
 
   // ── Helper courses pour un PS ────────────────────────────────────────────
-  function coursesForPS(psStr, jour) {
-    const nums = (psStr||'').match(/\d+/g)?.map(Number) || [];
-    return Object.entries(COURSES)
-      .filter(([,c]) => Array.isArray(c.ps) && nums.some(n => c.ps.includes(n)))
-      .map(([nom]) => nom);
+  function coursesForPS(psStr, jour, row) {
+    return coursesDeLigne(row || { ps: psStr, courses: [] }, jour);   // choisies à la main, sinon PS_CONCERNES
   }
 
   // ── HTML ─────────────────────────────────────────────────────────────────
@@ -3287,7 +3289,7 @@ function renderFicheSecteur() {
         r.crs ? `<span class="fs-radio-pill crs">${r.crs} CRS</span>` : '',
         r.cmv ? `<span class="fs-radio-pill cmv">${r.cmv} CMV</span>` : '',
       ].join('');
-      const courses = coursesForPS(r.ps, jourId)
+      const courses = coursesForPS(r.ps, jourId, r)
         .map(c => `<span class="fs-course-tag">${c}</span>`).join('');
       const kmRavit  = r.kmRavit  || '<span style="color:#ccc">—</span>';
       const kmAtelier = r.kmAtelier || '<span style="color:#ccc">—</span>';
@@ -3558,7 +3560,7 @@ async function loadSaisieFromSheets(jour) {
         collapsed:    false,
         commentaires: jsonComm.ok && jsonComm.data && jsonComm.data[s.secteur]
                         ? jsonComm.data[s.secteur] : ['','',''],
-        rows:         s.rows.map(r => ({ ...r })),
+        rows:         s.rows.map(r => ({ ...r, courses: Array.isArray(r.courses) ? r.courses : [] })),
       }));
       renderAll();
       toast(`Saisie ${jour} chargée depuis Sheets ✓`);
@@ -3614,7 +3616,11 @@ async function saveToSheets() {
       }
     }
 
-    toast('Sheets mis à jour ✓ (' + (jsonSaisie.data.inserted || 0) + ' PS sauvegardés)');
+    if (jsonSaisie.data && jsonSaisie.data.coursesManquantes) {
+      toast('⚠ PS sauvegardés, MAIS la colonne « COURSES » manque dans l\'onglet SAISIE (ligne 2) : les courses choisies ne sont pas enregistrées', 'warn');
+    } else {
+      toast('Sheets mis à jour ✓ (' + (jsonSaisie.data.inserted || 0) + ' PS sauvegardés)');
+    }
   } catch(e) {
     toast('Erreur envoi Sheets — brouillon local conservé', 'err');
     console.error('Sheets save error:', e);
@@ -3661,20 +3667,64 @@ function loadDraft() {
 // ========================================================
 // COURSES HELPERS
 // ========================================================
+// Courses d'une ligne : choisies à la main (row.courses) en priorité ; sinon repli automatique sur PS_CONCERNES (REF_Courses)
+function coursesDeLigne(row, jourId) {
+  const manuelles = (row && Array.isArray(row.courses)) ? row.courses.filter(Boolean) : [];
+  return manuelles.length ? manuelles : getCoursesForPS(row ? row.ps : '', jourId);
+}
+function pillCourse(name, croix) {
+  const c = COURSES[name];
+  const bg = c ? c.couleur : '#777';
+  return `<span class="course-pill ${croix ? 'manuelle' : ''}" style="background:${bg}22;color:${bg};border:1px solid ${bg}55">${name}${croix || ''}</span>`;
+}
+// Version lecture seule (Report, Fiche Secteur…)
+function renderCoursePillsRow(row, jourId) {
+  const l = coursesDeLigne(row, jourId);
+  return l.length ? l.map(n => pillCourse(n)).join('') : '<span class="course-none">—</span>';
+}
+// Compatibilité : ancien appel par libellé de PS (sans choix manuel)
 function renderCoursePills(psStr, jourId) {
-  const courses = getCoursesForPS(psStr, jourId);
-  if (!courses.length) return '<span class="course-none">—</span>';
-  return courses.map(name => {
-    const c = COURSES[name];
-    const bg = c ? c.couleur : '#555';
-    return `<span class="course-pill" style="background:${bg}22;color:${bg};border:1px solid ${bg}55">${name}</span>`;
-  }).join('');
+  return renderCoursePillsRow({ ps: psStr, courses: [] }, jourId);
 }
-
-function refreshCoursePills(si, ri, psVal) {
+// Cellule de la saisie : pastilles (✕ si choisies à la main) + menu « ＋ course »
+function renderCoursesCell(si, ri, row) {
+  const manuelles = Array.isArray(row.courses) ? row.courses.filter(Boolean) : [];
+  let h = '<div class="course-cell">';
+  if (manuelles.length) {
+    h += manuelles.map((n, k) => pillCourse(n, `<span class="course-x" title="Retirer" onclick="removeCourse(${si},${ri},${k})">✕</span>`)).join('');
+  } else {
+    const auto = getCoursesForPS(row.ps, currentJour);
+    h += auto.length ? auto.map(n => pillCourse(n)).join('') : '<span class="course-none">—</span>';
+  }
+  if (manuelles.length < 4) {
+    let dispo = Object.entries(COURSES).filter(([n, c]) => Array.isArray(c.jours) && c.jours.includes(currentJour)).map(([n]) => n);
+    if (!dispo.length) dispo = Object.keys(COURSES);          // aucun Jx renseigné dans REF_Courses : toutes les courses
+    dispo = dispo.filter(n => !manuelles.includes(n));
+    if (dispo.length) {
+      h += `<select class="course-add" onchange="addCourse(${si},${ri},this.value)" title="Ajouter une course à ce PS"><option value="">＋ course</option>` +
+           dispo.map(n => `<option value="${attrEsc(n)}">${n}</option>`).join('') + `</select>`;
+    }
+  }
+  return h + '</div>';
+}
+function majCelluleCourses(si, ri) {
   const cell = document.getElementById(`course-${si}-${ri}`);
-  if (cell) cell.innerHTML = renderCoursePills(psVal, currentJour);
+  if (cell) cell.innerHTML = renderCoursesCell(si, ri, state[currentJour][si].rows[ri]);
 }
+function addCourse(si, ri, nom) {
+  if (!nom) return;
+  const row = state[currentJour][si].rows[ri];
+  if (!Array.isArray(row.courses)) row.courses = [];
+  if (row.courses.length >= 4) { toast('4 courses maximum par PS', 'warn'); majCelluleCourses(si, ri); return; }
+  if (!row.courses.includes(nom)) row.courses.push(nom);
+  majCelluleCourses(si, ri);
+}
+function removeCourse(si, ri, k) {
+  const row = state[currentJour][si].rows[ri];
+  if (Array.isArray(row.courses)) row.courses.splice(k, 1);
+  majCelluleCourses(si, ri);
+}
+function refreshCoursePills(si, ri, psVal) { majCelluleCourses(si, ri); }
 
 function openCourses() {
   const body = document.getElementById('coursesPanelBody');
