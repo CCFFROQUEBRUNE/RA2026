@@ -1208,6 +1208,17 @@ const BENEVOLES_DATA = []; // {nom, label, tel} — alimenté depuis Sheets
 // ex: { 'Bénévole_003': 'Bénévole_003 Corinne' }
 // Valeur stockée dans BENEVOLE_x = NOM seul ; affichage = label complet
 const BENEVOLES_LABEL = {};
+// Cumul des libellés NOM+PRENOM vus (tous jours confondus + liste complète fournie par le serveur) :
+// sert aux fiches imprimées (Fiches PS, Fiche Secteur, Report) qui peuvent concerner un jour ≠ jour chargé
+// ou un bénévole non disponible ce jour-là. Jamais vidé.
+const BENEVOLES_LABEL_CUMUL = {};
+// Libellé d'affichage d'un bénévole/référent stocké (NOM seul ou « NOM Prénom » si homonyme).
+// LA_GAILLARDE : jamais transformé (module validé, fiches déjà prêtes).
+function nomAff(n, secteur) {
+  if (!n) return n;
+  if (secteur === 'LA_GAILLARDE') return n;
+  return BENEVOLES_LABEL[n] || BENEVOLES_LABEL_CUMUL[n] || n;
+}
 
 // ---- COURSES : brouillon fourni ----
 // Structure : { nomCourse: { jours: ['J2',...], ps: [100,101,...] } }
@@ -2074,7 +2085,7 @@ function openReport() {
       <div class="fs-section" style="margin-bottom:18px">
         <div class="fs-section-header" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px">
           <span style="font-size:16px;letter-spacing:1px">▸ ${s.secteur}</span>
-          <span style="font-size:12px;opacity:.85">Réf: <strong>${s.referant}</strong></span>
+          <span style="font-size:12px;opacity:.85">Réf: <strong>${nomAff(s.referant, s.secteur)}</strong></span>
           ${tel ? `<span style="font-size:12px;color:#F39C12">📞 ${tel}</span>` : ''}
           <span style="font-size:12px;opacity:.85">H MeP: <strong style="color:#E67E22">${s.hmepSect||'—'}</strong></span>
           <span style="margin-left:auto;font-size:11px;opacity:.7">${sPS} PS · ${sBenv} bénév. · ${sVehs.size} véh.${sCOM?' · '+sCOM+'COM':''}${sCRS?' · '+sCRS+'CRS':''}${sCMV?' · '+sCMV+'CMV':''}</span>
@@ -2088,7 +2099,7 @@ function openReport() {
         <th>Bénévoles</th><th>Radios</th><th>Course(s)</th><th>Observations</th>
       </tr></thead><tbody>`;
       rows.forEach(r => {
-        const benvs = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean).join('<br>');
+        const benvs = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean).map(b => nomAff(b, s.secteur)).join('<br>');
         const radios = [
           r.com ? `<span class="fs-radio-pill com">${r.com} COM</span>` : '',
           r.crs ? `<span class="fs-radio-pill crs">${r.crs} CRS</span>` : '',
@@ -2783,10 +2794,9 @@ function glrdImprimerFiches() {
   // Basculer sur l'onglet Fiches si pas déjà actif
   document.querySelectorAll('.glrd-tab').forEach((b,i) => b.classList.toggle('active', i===1));
   document.querySelectorAll('.glrd-tab-content').forEach((c,i) => c.classList.toggle('active', i===1));
-  // Remettre les filtres à zéro → impression de TOUS les PS (1 page par PS)
-  document.getElementById('glrdBenvSelect').value    = '';
-  document.getElementById('glrdPSFicheSelect').value = '';
-  glrdRenderFiches();
+  // On imprime exactement ce qui est affiché : « — Tous — » = tous les PS (1 page par PS),
+  // un PS ou un bénévole choisi = seulement ses fiches.
+  glrdRenderFiches();   // conserve les filtres en cours (les menus gardent leur valeur) et réaffiche
   document.body.classList.add('print-gaillarde');
   window.print();
   setTimeout(() => document.body.classList.remove('print-gaillarde'), 1000);
@@ -3109,8 +3119,8 @@ function renderFichesPSCards() {
     const sansSect = groupe || estSolo(secteurNom);               // PS sans secteur : pas de nom de secteur à afficher
     const refNom   = groupe ? (r._ref || '') : sectData.referant;
     const tel      = groupe ? telDe(r._ref, r._tel) : tel0;
-    const benvs    = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean);
-    const refPS    = isGaillarde ? (r.b1 || '—') : (refNom || '—');
+    const benvs    = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean).map(b => nomAff(b, sectData.secteur));
+    const refPS    = isGaillarde ? (r.b1 || '—') : (nomAff(refNom) || '—');
     // Pour LA_GAILLARDE : tel du référent PS = tel de B1 dans la liste bénévoles
     const telB1    = isGaillarde
       ? (BENEVOLES_DATA.find(b => b.nom === r.b1) || {}).tel || '—'
@@ -3211,7 +3221,6 @@ function renderFicheSecteur() {
   // Trouver les données du secteur pour ce jour
   const sectData = sectDataFiche(secteurNom, jourId);
   const groupe   = !!(sectData && sectData._groupe);
-  const nomAff   = groupe ? 'PS SANS SECTEUR' : secteurNom;
 
   if (!sectData) {
     body.innerHTML = `<div class="fs-empty">Aucune saisie pour le secteur <strong>${secteurNom === GROUPE_SOLO ? 'PS sans secteur' : secteurNom}</strong> en ${jourId}.</div>`;
@@ -3238,7 +3247,7 @@ function renderFicheSecteur() {
 
   // ── HTML ─────────────────────────────────────────────────────────────────
   let html = `
-    <div class="fs-titre">${groupe ? nomAff : 'SECTEUR ' + secteurNom}</div>
+    <div class="fs-titre">${groupe ? 'PS SANS SECTEUR' : 'SECTEUR ' + secteurNom}</div>
     <div class="fs-sous-titre">
       ROC D'AZUR 2026 — ${jourInfo.date} (${jourId})
     </div>
@@ -3254,7 +3263,7 @@ function renderFicheSecteur() {
           </div>
           <div class="fs-info-item">
             <div class="fs-info-label">Référant</div>
-            <div class="fs-info-val">${groupe ? '(voir chaque PS)' : (sectData.referant || '—')}</div>
+            <div class="fs-info-val">${groupe ? '(voir chaque PS)' : (nomAff(sectData.referant, sectData.secteur) || '—')}</div>
           </div>
           <div class="fs-info-item">
             <div class="fs-info-label">H MeP Secteur</div>
@@ -3336,7 +3345,7 @@ function renderFicheSecteur() {
           <tbody>`;
 
     rows.forEach(r => {
-      const benvs = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean).join('<br>');
+      const benvs = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean).map(b => nomAff(b, sectData.secteur)).join('<br>');
       const radios = [
         r.com ? `<span class="fs-radio-pill com">${r.com} COM</span>` : '',
         r.crs ? `<span class="fs-radio-pill crs">${r.crs} CRS</span>` : '',
@@ -3349,7 +3358,7 @@ function renderFicheSecteur() {
 
       html += `
             <tr>
-              <td><strong>${r.ps}</strong>${groupe ? `<br><span style="font-size:10px;color:#555">Réf. : ${r._ref || '—'}</span>` : ''}</td>
+              <td><strong>${r.ps}</strong>${groupe ? `<br><span style="font-size:10px;color:#555">Réf. : ${nomAff(r._ref) || '—'}</span>` : ''}</td>
               <td><strong style="color:#C0392B">${r.hmep || '—'}</strong></td>
               <td>${r.vehA || '—'}</td>
               <td>${r.vehB || '—'}</td>
@@ -3456,7 +3465,12 @@ async function loadReferentiels() {
       BENEVOLES.push(nomSeul);
       BENEVOLES_DATA.push({ nom: nomSeul, label, tel: b.tel || '' });
       BENEVOLES_LABEL[nomSeul] = label;
+      BENEVOLES_LABEL_CUMUL[nomSeul] = label;
     });
+    // Liste complète (tous bénévoles, quel que soit le jour) fournie par le serveur depuis la v23
+    if (d.labelsTous && typeof d.labelsTous === 'object') {
+      Object.keys(d.labelsTous).forEach(k => { if (d.labelsTous[k]) BENEVOLES_LABEL_CUMUL[k] = d.labelsTous[k]; });
+    }
 
     // ── Secteurs et véhicules : source de vérité = Sheets (REF_Secteurs / REF_Vehicules)
     // Nettoyage : texte, trim, lignes vides ignorées, doublons supprimés, ordre du Sheet conservé.
