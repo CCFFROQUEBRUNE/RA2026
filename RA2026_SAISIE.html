@@ -624,6 +624,29 @@
     }
   }
 
+
+  /* ========= FICHE VÉRIFICATEUR (saisie) ========= */
+  #fpsVerifBtn { background:transparent; color:var(--orange,#E67E22); border:1px solid var(--orange,#E67E22); border-radius:4px; padding:4px 12px;
+    font-family:'Barlow Condensed',sans-serif; font-size:12px; font-weight:700; cursor:pointer; letter-spacing:1px; }
+  #fpsVerifBtn.active { background:var(--orange,#E67E22); color:#fff; }
+  .vf-card { border:1px solid #ccd; border-radius:6px; margin:10px 0 18px; padding:10px 12px; background:#fff; }
+  .vf-head { display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:8px; color:#1A3A5C; }
+  .vf-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px 12px; }
+  .vf-grid label { font-size:11px; text-transform:uppercase; color:#666; display:flex; flex-direction:column; gap:2px; }
+  .vf-grid .vf-w2 { grid-column:span 2; } .vf-grid .vf-w4 { grid-column:span 3; }
+  .vf-grid select, .vf-grid input, .vf-table select, .vf-table input { font-size:13px; padding:4px 6px; border:1px solid #bbb; border-radius:4px; width:100%; box-sizing:border-box; text-transform:none; }
+  .vf-table { width:100%; border-collapse:collapse; margin-top:10px; }
+  .vf-table th { font-size:11px; text-align:left; color:#666; padding:2px 4px; border-bottom:2px solid #1A3A5C; }
+  .vf-table td { padding:2px 3px; border-bottom:1px solid #eee; }
+  .vf-table .vf-n { width:24px; color:#999; font-size:11px; text-align:right; }
+  .vf-table td:nth-child(4) { width:70px; } .vf-table td:nth-child(5) { width:90px; }
+  .vf-dup select { border-color:#C0392B; background:#FDEDEC; }
+  .vf-alerte { background:#FDEDEC; border-left:3px solid #C0392B; color:#922B21; padding:6px 10px; margin:8px 0; font-size:13px; }
+  .vf-warn { color:#C0392B; font-size:11px; text-transform:none; }
+  .vf-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 20px; }
+  .vf-btn-sm { background:#fff; border:1px solid #888; border-radius:4px; padding:4px 10px; font-size:12px; cursor:pointer; }
+  #verifPrint { display:none; }
+
   /* ========= LA_GAILLARDE ========= */
   .glrd-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.85);
@@ -919,6 +942,50 @@
     80% { transform: translateX(5px); }
   }
   .pin-shake { animation: pinShake .4s ease; }
+
+  /* ── Impression Fiche Vérificateur (A4 portrait, lisible à vélo) ── */
+  @page verif { size:A4 portrait; margin:8mm; }
+  @media print {
+    body.print-verif > *:not(#verifPrint) { display:none !important; }
+    body.print-verif { background:#fff !important; }
+    body.print-verif #verifPrint { display:block !important; color:#000; font-family:'Arial Narrow','Liberation Sans Narrow',Arial,sans-serif;
+      -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    #verifPrint .vp-page { page:verif; width:194mm; height:277mm; page-break-after:always; display:flex; flex-direction:column; overflow:hidden; }
+    #verifPrint .vp-page:last-child { page-break-after:avoid; }
+    #verifPrint * { box-sizing:border-box; }
+    #verifPrint .top { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.2mm solid #000; padding-bottom:1.5mm; }
+    #verifPrint h1 { margin:0; font-size:22pt; letter-spacing:.5px; }
+    #verifPrint .sub { font-size:12pt; font-weight:700; }
+    #verifPrint .fn { text-align:right; font-size:16pt; font-weight:700; }
+    #verifPrint .hd { display:grid; grid-template-columns:repeat(4,1fr); gap:1.5mm 3mm; padding:1.5mm 0; border-bottom:.6mm solid #000; }
+    #verifPrint .hd .g2 { grid-column:span 2; }
+    #verifPrint .hd label { display:block; font-size:8pt; text-transform:uppercase; color:#333; }
+    #verifPrint .big { font-size:16pt; }
+    #verifPrint .pill { border:.5mm solid #000; border-radius:2mm; padding:0 2mm; font-size:14pt; margin-right:1mm; }
+    #verifPrint table { width:100%; border-collapse:collapse; margin-top:2mm; table-layout:fixed; }
+    #verifPrint col.k1 { width:72mm; } #verifPrint col.k2 { width:15mm; } #verifPrint col.k3 { width:19mm; }
+    #verifPrint .ps.stk b { display:block; font-size:12.5pt !important; line-height:1; margin:0; }
+    #verifPrint .ps.stk small { display:block; font-size:8pt !important; line-height:1; margin-top:.3mm; overflow:hidden; text-overflow:ellipsis; }
+    #verifPrint th { font-size:9pt; text-align:left; border-bottom:.8mm solid #000; padding:0 1.5mm .5mm; text-transform:uppercase; }
+    #verifPrint td { border-bottom:.3mm solid #666; padding:0 1.5mm; vertical-align:middle; overflow:hidden; }
+    #verifPrint .ps { white-space:nowrap; }
+    #verifPrint .ps b { font-size:21pt; margin-right:2mm; }
+    #verifPrint .ps small { font-size:9pt; display:inline; }
+    #verifPrint .rs { text-align:center; }
+    #verifPrint .rs span { display:inline-block; width:11mm; text-align:center; font-weight:700; font-size:18pt; line-height:1; border:.7mm solid #000; }
+    #verifPrint .rs .R { background:#000 !important; color:#fff !important; }
+    #verifPrint .rs .S { background:#fff; color:#000; }
+    #verifPrint .h { font-size:17pt; font-weight:700; text-align:center; }
+    #verifPrint .c { font-size:12.5pt; white-space:nowrap; text-overflow:ellipsis; }
+    #verifPrint .n25 td { height:7.2mm; }
+    #verifPrint .n25 .ps b { font-size:19pt; }
+    #verifPrint .n30 td { height:6.3mm; }
+    #verifPrint .n30 .ps b { font-size:16pt; } #verifPrint .n30 .ps small { font-size:8pt; }
+    #verifPrint .n30 .rs span { font-size:14pt; width:9mm; } #verifPrint .n30 .h { font-size:14pt; } #verifPrint .n30 .c { font-size:11pt; }
+    #verifPrint .leg { font-size:11pt; margin-top:1.5mm; }
+    #verifPrint .lib { margin-top:auto; font-size:9pt; }
+    #verifPrint .line { border-bottom:.3mm solid #000; height:7.5mm; font-size:12pt; }
+  }
 </style>
 </head>
 <body>
@@ -1094,6 +1161,7 @@
   </div>
 </div>
 
+<div id="verifPrint"></div>
 <div class="toast" id="toast"></div>
 
 <!-- COURSES OVERLAY -->
@@ -1129,7 +1197,7 @@
   <div class="fiche-sect-panel" style="max-width:960px">
     <div class="fiche-sect-controls">
       <label>Secteur</label>
-      <select id="fpsSecteurSelect" onchange="renderFichesPS()"></select>
+      <select id="fpsSecteurSelect" onchange="fpsChangeSecteur()"></select>
       <label style="margin-left:8px">Jour</label>
       <select id="fpsJourSelect" onchange="fpsChangeJour()"></select>
       <button class="btn-fiche-print" onclick="imprimerFichesPS()">🖨 Imprimer</button>
@@ -1141,6 +1209,7 @@
       <div id="fpsPSSelector" style="display:flex;gap:6px;flex-wrap:wrap"></div>
       <button onclick="fpsToutSelectionner()" style="margin-left:auto;background:var(--bleu);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px">TOUS</button>
       <button onclick="fpsToutDeselectionner()" style="background:transparent;color:var(--texte2);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px">AUCUN</button>
+      <button id="fpsVerifBtn" onclick="verifOuvrir()" title="Fiche du Vérificateur (multi-secteurs)">VERIF</button>
     </div>
     <div class="fiche-sect-body" id="fichesPSBody">
       <div class="fs-empty">Sélectionner un secteur et un jour</div>
@@ -2993,12 +3062,18 @@ function openFichesPS() {
   const premierSect = (state[currentJour] || [])[0];
   remplirMenuSecteursFiches(selSect, currentJour, premierSect ? premierSect.secteur : '');
 
+  verifMode = false; const bv = document.getElementById('fpsVerifBtn'); if (bv) bv.classList.remove('active');
   document.getElementById('fichesPSOverlay').classList.add('active');
   renderFichesPS();
 }
 
 // Changement de jour : liste des secteurs reconstruite pour CE jour
 function fpsChangeJour() {
+  if (verifMode) {      // en mode VERIF, le changement de jour recharge la fiche Vérificateur de ce jour
+    remplirMenuSecteursFiches(document.getElementById('fpsSecteurSelect'), document.getElementById('fpsJourSelect').value);
+    verifChargerJour(document.getElementById('fpsJourSelect').value);
+    return;
+  }
   remplirMenuSecteursFiches(document.getElementById('fpsSecteurSelect'), document.getElementById('fpsJourSelect').value);
   renderFichesPS();
 }
@@ -3008,13 +3083,20 @@ function closeFichesPS() {
 }
 
 function imprimerFichesPS() {
+  if (verifMode) { verifImprimer(); return; }
   document.body.classList.remove('print-fiche-sect', 'print-report');
   document.body.classList.add('print-fiches-ps');
   window.print();
   setTimeout(() => document.body.classList.remove('print-fiches-ps'), 1000);
 }
 
+function fpsChangeSecteur() {
+  if (verifMode) { verifMode = false; const b = document.getElementById('fpsVerifBtn'); if (b) b.classList.remove('active'); }
+  renderFichesPS();
+}
+
 function fpsToutSelectionner() {
+  if (verifMode) { verifQuitter(); return; }     // retour aux fiches PS du secteur (tous cochés par défaut)
   document.querySelectorAll('.fps-ps-btn').forEach(b => {
     b.classList.add('active');
     fpsSelectedPS.add(b.dataset.ps);
@@ -3023,6 +3105,7 @@ function fpsToutSelectionner() {
 }
 
 function fpsToutDeselectionner() {
+  if (verifMode) verifQuitter();
   document.querySelectorAll('.fps-ps-btn').forEach(b => b.classList.remove('active'));
   fpsSelectedPS.clear();
   renderFichesPSCards();
@@ -3210,6 +3293,329 @@ function renderFichesPSCards() {
 
   html += `<button class="btn-fiche-print fps-no-print" onclick="imprimerFichesPS()">🖨 Imprimer ces fiches</button>`;
   body.innerHTML = html;
+}
+
+// ========================================================
+// FICHE VÉRIFICATEUR (multi-secteurs) — saisie + impression A4
+// Module indépendant : stockage SAISIE_VERIF (Apps Script getVerif / saveVerif).
+// N'utilise ni state[] ni SAISIE, ni le module LA_GAILLARDE.
+// ========================================================
+const VERIF_LIGNES_MAX = 25;                 // lignes par fiche (mise en page A4 « n25 ») — 30 possible (« n30 »)
+const VERIF_FICHES_MAX = 2;                  // fiches par jour
+const VERIF_COMM_MAX   = 40;                 // caractères max du commentaire d'une ligne (largeur de colonne)
+const VERIF_JOURS      = ['J2','J3','J4','J5'];   // J1 : pas de fiche Vérificateur
+let verifMode  = false;                      // true = le panneau Fiches PS affiche la saisie VERIF
+let verifJour  = null;
+const verifFiches = {};                      // { J2: [fiche, ...] }
+const verifRefCache = {};                    // { J3: {benevoles:[{label,tel}], ps:[label]} } (jours ≠ jour chargé)
+let verifDirty = false, verifSaveInfo = '';
+
+function verifEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function verifFicheVide() {
+  return { verificateur:'', tel:'', hmepSect:'', vehicule:'', com:0, crs:0, cmv:0, comm1:'', comm2:'',
+           lignes: Array.from({length: VERIF_LIGNES_MAX}, () => ({ ps:'', comm:'', type:'', hmep:'' })) };
+}
+// Complète une fiche reçue du serveur jusqu'à VERIF_LIGNES_MAX lignes (les PS saisis restent en tête)
+function verifNormaliser(f) {
+  const base = verifFicheVide();
+  const out = Object.assign(base, {
+    verificateur: f.verificateur || '', tel: f.tel || '', hmepSect: f.hmepSect || '', vehicule: f.vehicule || '',
+    com: +f.com || 0, crs: +f.crs || 0, cmv: +f.cmv || 0, comm1: f.comm1 || '', comm2: f.comm2 || ''
+  });
+  (f.lignes || []).slice(0, VERIF_LIGNES_MAX).forEach((l, i) => {
+    out.lignes[i] = { ps: l.ps || '', comm: l.comm || '', type: (l.type === 'R' || l.type === 'S') ? l.type : '', hmep: l.hmep || '' };
+  });
+  return out;
+}
+
+// ── Listes du jour (bénévoles + PS) : jour chargé = variables globales ; autre jour = getReferentiels (en cache)
+async function verifListes(jour) {
+  if (jour === refJourCharge && BENEVOLES_DATA.length) {
+    return { benevoles: BENEVOLES_DATA.map(b => ({ label: b.label, tel: b.tel || '' })), ps: PS_TOUS.map(p => p.label) };
+  }
+  if (verifRefCache[jour]) return verifRefCache[jour];
+  try {
+    const json = await callASRetry({ action: 'getReferentiels', jour });
+    if (!json.ok) throw new Error(json.error);
+    const d = json.data, deja = new Set(), ps = [];
+    (d.ps || []).forEach(p => {
+      const label = p.label || `${p.num} - ${p.lieudit}`;
+      if (normCle(p.secteur) !== 'LA_GAILLARDE' && !estPSLG(label) && !deja.has(label)) { deja.add(label); ps.push(label); }
+    });
+    ps.sort((a, b) => ((parsePS(a)[0] || {}).n || 0) - ((parsePS(b)[0] || {}).n || 0) || a.localeCompare(b, 'fr'));
+    const res = { benevoles: (d.benevoles || []).map(b => ({ label: b.nom, tel: b.tel || '' })), ps };
+    verifRefCache[jour] = res;
+    return res;
+  } catch (e) {
+    console.warn('VERIF listes ' + jour, e);
+    return { benevoles: [], ps: [], erreur: true };
+  }
+}
+
+// ── Entrée / sortie du mode VERIF ──────────────────────────────────────────
+async function verifOuvrir() {
+  verifMode = true;
+  document.getElementById('fpsVerifBtn').classList.add('active');
+  document.getElementById('fpsPSSelector').innerHTML = `<span style="font-size:12px;color:var(--texte2);font-style:italic">Fiche Vérificateur — saisie ci-dessous</span>`;
+  verifJour = document.getElementById('fpsJourSelect').value;
+  await verifChargerJour(verifJour);
+}
+function verifQuitter() {
+  verifMode = false;
+  const b = document.getElementById('fpsVerifBtn'); if (b) b.classList.remove('active');
+  renderFichesPS();
+}
+async function verifChargerJour(jour) {
+  const body = document.getElementById('fichesPSBody');
+  verifJour = jour;
+  if (!VERIF_JOURS.includes(jour)) {
+    body.innerHTML = `<div class="fs-empty">La fiche Vérificateur est prévue de J2 à J5. Choisissez un de ces jours.</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="fs-empty">⏳ Chargement de la fiche Vérificateur ${jour}…</div>`;
+  let fiches = null, listes;
+  [listes] = await Promise.all([verifListes(jour)]);
+  if (SHEETS_ENABLED) {
+    try {
+      const json = await callASRetry({ action: 'getVerif', jour });
+      if (!json.ok) throw new Error(json.error);
+      fiches = (json.data || []).map(verifNormaliser);
+    } catch (e) {
+      console.warn('getVerif', e);
+      toast('Fiche Vérificateur : lecture Sheets impossible — brouillon local', 'warn');
+      try { const dr = JSON.parse(localStorage.getItem('ra2026_verif_' + jour) || 'null'); if (dr) fiches = dr.map(verifNormaliser); } catch(_) {}
+    }
+  }
+  if (!fiches || !fiches.length) fiches = [verifFicheVide()];
+  verifFiches[jour] = fiches.slice(0, VERIF_FICHES_MAX);
+  verifDirty = false; verifSaveInfo = '';
+  verifRefCache['__courant'] = listes;
+  verifRender();
+}
+
+// ── Saisie ────────────────────────────────────────────────────────────────
+function verifMarquer() {
+  verifDirty = true;
+  try { localStorage.setItem('ra2026_verif_' + verifJour, JSON.stringify(verifFiches[verifJour])); } catch(e) {}
+  const st = document.getElementById('vfStatut');
+  if (st) { st.textContent = '● Modifications non enregistrées'; st.style.color = '#E67E22'; }
+}
+function verifSet(fi, champ, val) {
+  const f = verifFiches[verifJour][fi];
+  if (champ === 'com' || champ === 'crs' || champ === 'cmv') val = Math.max(0, Math.min(99, parseInt(val, 10) || 0));
+  f[champ] = val;
+  verifMarquer();
+}
+function verifChoixVerificateur(fi, val) {
+  const f = verifFiches[verifJour][fi];
+  f.verificateur = val;
+  const L = verifRefCache['__courant'] || { benevoles: [] };
+  const b = L.benevoles.find(x => x.label === val);
+  if (b && b.tel) { f.tel = b.tel; const t = document.getElementById(`vf-${fi}-tel`); if (t) t.value = b.tel; }
+  verifMarquer();
+}
+function verifSetLigne(fi, li, champ, val) {
+  const f = verifFiches[verifJour][fi];
+  if (champ === 'ps' && val === '__LIBRE__') {
+    const saisi = (prompt('N° et nom du PS (ex. : 112 - CARREFOUR DU BAOU)') || '').trim();
+    if (!saisi) { verifRender(true); return; }
+    if (!/^\d/.test(saisi)) { toast('Le PS doit commencer par son numéro', 'err'); verifRender(true); return; }
+    if (estPSLG(saisi))     { toast('PS 30 à 41 : réservés au module LA_GAILLARDE', 'err'); verifRender(true); return; }
+    val = saisi;
+  }
+  f.lignes[li][champ] = val;
+  verifMarquer();
+  if (champ === 'ps') verifRender(true);        // doublons + libellé
+}
+function verifAjouterFiche() {
+  const L = verifFiches[verifJour];
+  if (L.length >= VERIF_FICHES_MAX) return;
+  L.push(verifFicheVide()); verifMarquer(); verifRender(true);
+}
+function verifSupprimerFiche(fi) {
+  if (fi === 0) return;
+  if (!confirm('Supprimer la fiche ' + (fi + 1) + ' ?')) return;
+  verifFiches[verifJour].splice(fi, 1); verifMarquer(); verifRender(true);
+}
+
+// PS utilisés plusieurs fois sur le jour (toutes fiches)
+function verifDoublons(jour) {
+  const cpt = {};
+  (verifFiches[jour] || []).forEach(f => f.lignes.forEach(l => {
+    const k = (parsePS(l.ps).map(p => p.n + (p.bis ? 'B' : '')).join('+')) || l.ps;
+    if (l.ps) cpt[k] = (cpt[k] || 0) + 1;
+  }));
+  return cpt;
+}
+function verifCleLigne(ps) { return (parsePS(ps).map(p => p.n + (p.bis ? 'B' : '')).join('+')) || ps; }
+
+// Véhicule déjà pris par un secteur « Tous Secteurs » ce jour-là ? (si la saisie du jour est en mémoire)
+function verifVehiculePris(jour, veh) {
+  if (!veh) return '';
+  const hit = (state[jour] || []).find(s => s.rows.some(r => r.vehA === veh || r.vehB === veh));
+  return hit ? hit.secteur : '';
+}
+
+// ── Affichage écran ───────────────────────────────────────────────────────
+function verifRender(garderScroll) {
+  const body = document.getElementById('fichesPSBody');
+  const sc = garderScroll ? body.scrollTop : 0;
+  const jour = verifJour, fiches = verifFiches[jour] || [];
+  const L = verifRefCache['__courant'] || { benevoles: [], ps: [] };
+  const jourInfo = JOURS.find(j => j.id === jour);
+  const cpt = verifDoublons(jour);
+  const optsPS = (val) => {
+    const present = L.ps.includes(val);
+    return `<option value="">—</option>` +
+      (val && !present ? `<option value="${attrEsc(val)}" selected>${verifEsc(val)}</option>` : '') +
+      L.ps.map(p => `<option value="${attrEsc(p)}" ${p === val ? 'selected' : ''}>${verifEsc(p)}</option>`).join('') +
+      `<option value="__LIBRE__">✎ PS non listé…</option>`;
+  };
+  const optsHeure = (val) => `<option value="">—</option>` +
+    HEURES_MEP.map(h => `<option value="${h}" ${h === val ? 'selected' : ''}>${h}</option>`).join('') +
+    (val && !HEURES_MEP.includes(val) ? `<option value="${attrEsc(val)}" selected>${verifEsc(val)}</option>` : '');
+
+  let html = `
+    <div class="fs-titre" style="margin-bottom:2px">FICHE VÉRIFICATEUR — MULTI-SECTEURS</div>
+    <div class="fs-sous-titre">${jourInfo.date} (${jour}) — ${fiches.length} fiche(s)
+      ${L.erreur ? ' · <span style="color:#C0392B">listes bénévoles/PS non chargées (saisie libre possible)</span>' : ''}</div>`;
+  const doublons = Object.keys(cpt).filter(k => cpt[k] > 1);
+  if (doublons.length) html += `<div class="vf-alerte">⚠ PS saisi plusieurs fois : ${doublons.map(k => '<strong>' + verifEsc(k.replace(/B/g,' BIS').replace(/\+/g,' + ')) + '</strong>').join(', ')}</div>`;
+
+  fiches.forEach((f, fi) => {
+    const pris = verifVehiculePris(jour, f.vehicule);
+    const nbPS = f.lignes.filter(l => l.ps).length;
+    html += `
+    <div class="vf-card">
+      <div class="vf-head"><span>Fiche ${fi + 1}${fiches.length > 1 ? ' / ' + fiches.length : ''} — ${nbPS} PS sur ${VERIF_LIGNES_MAX}</span>
+        ${fi > 0 ? `<button class="vf-btn-sm" onclick="verifSupprimerFiche(${fi})">🗑 Supprimer cette fiche</button>` : ''}</div>
+      <div class="vf-grid">
+        <label class="vf-w2">Vérificateur
+          <select id="vf-${fi}-nom" onchange="verifChoixVerificateur(${fi}, this.value)">
+            <option value="">— choisir —</option>
+            ${f.verificateur && !L.benevoles.some(b => b.label === f.verificateur) ? `<option value="${attrEsc(f.verificateur)}" selected>${verifEsc(f.verificateur)}</option>` : ''}
+            ${L.benevoles.map(b => `<option value="${attrEsc(b.label)}" ${b.label === f.verificateur ? 'selected' : ''}>${verifEsc(b.label)}</option>`).join('')}
+          </select></label>
+        <label class="vf-w2">Téléphone <input id="vf-${fi}-tel" type="tel" value="${attrEsc(f.tel)}" oninput="verifSet(${fi},'tel',this.value)"></label>
+        <label class="vf-w2">H MeP secteur <select onchange="verifSet(${fi},'hmepSect',this.value)">${optsHeure(f.hmepSect)}</select></label>
+        <label class="vf-w2">Véhicule
+          <select onchange="verifSet(${fi},'vehicule',this.value); verifRender(true)">
+            <option value="">—</option>
+            ${VEHICULES.map(v => `<option value="${attrEsc(v)}" ${v === f.vehicule ? 'selected' : ''}>${verifEsc(v)}</option>`).join('')}
+            ${f.vehicule && !VEHICULES.includes(f.vehicule) ? `<option value="${attrEsc(f.vehicule)}" selected>${verifEsc(f.vehicule)}</option>` : ''}
+          </select>
+          ${pris ? `<span class="vf-warn">⚠ déjà utilisé par le secteur ${verifEsc(pris)}</span>` : ''}</label>
+        <label>Radios COM <input type="number" min="0" max="${RADIO_MAX.com}" value="${f.com}" oninput="verifSet(${fi},'com',this.value)"></label>
+        <label>CRS <input type="number" min="0" max="${RADIO_MAX.crs}" value="${f.crs}" oninput="verifSet(${fi},'crs',this.value)"></label>
+        <label>CMV <input type="number" min="0" max="${RADIO_MAX.cmv}" value="${f.cmv}" oninput="verifSet(${fi},'cmv',this.value)"></label>
+      </div>
+      <table class="vf-table"><thead><tr><th>#</th><th>N° PS · lieu-dit</th><th>Commentaire (${VERIF_COMM_MAX} car. max)</th><th>R / S</th><th>H MeP</th></tr></thead><tbody>
+      ${f.lignes.map((l, li) => `
+        <tr class="${l.ps && cpt[verifCleLigne(l.ps)] > 1 ? 'vf-dup' : ''}">
+          <td class="vf-n">${li + 1}</td>
+          <td><select onchange="verifSetLigne(${fi},${li},'ps',this.value)">${optsPS(l.ps)}</select></td>
+          <td><input type="text" maxlength="${VERIF_COMM_MAX}" value="${attrEsc(l.comm)}" oninput="verifSetLigne(${fi},${li},'comm',this.value)"></td>
+          <td><select onchange="verifSetLigne(${fi},${li},'type',this.value)">
+            <option value="">—</option><option value="R" ${l.type === 'R' ? 'selected' : ''}>R</option><option value="S" ${l.type === 'S' ? 'selected' : ''}>S</option></select></td>
+          <td><select onchange="verifSetLigne(${fi},${li},'hmep',this.value)">${optsHeure(l.hmep)}</select></td>
+        </tr>`).join('')}
+      </tbody></table>
+      <div class="vf-grid" style="margin-top:8px">
+        <label class="vf-w4">Commentaire libre 1 <input type="text" maxlength="110" value="${attrEsc(f.comm1)}" oninput="verifSet(${fi},'comm1',this.value)"></label>
+        <label class="vf-w4">Commentaire libre 2 <input type="text" maxlength="110" value="${attrEsc(f.comm2)}" oninput="verifSet(${fi},'comm2',this.value)"></label>
+      </div>
+    </div>`;
+  });
+
+  html += `<div class="vf-actions fps-no-print">
+      ${fiches.length < VERIF_FICHES_MAX ? `<button class="vf-btn-sm" onclick="verifAjouterFiche()">＋ Ajouter la fiche ${fiches.length + 1}</button>` : ''}
+      <button class="btn-fiche-print" style="background:#1E8449" onclick="verifEnregistrer()">💾 Enregistrer</button>
+      <button class="btn-fiche-print" onclick="verifImprimer()">🖨 Imprimer</button>
+      <span id="vfStatut" style="font-size:12px;color:${verifDirty ? '#E67E22' : '#1E8449'}">${verifDirty ? '● Modifications non enregistrées' : (verifSaveInfo || '')}</span>
+    </div>`;
+  body.innerHTML = html;
+  body.scrollTop = sc;
+}
+
+// ── Enregistrement (Sheets) ───────────────────────────────────────────────
+function verifPourEnvoi(jour) {
+  return (verifFiches[jour] || []).map(f => ({
+    verificateur: f.verificateur, tel: f.tel, hmepSect: f.hmepSect, vehicule: f.vehicule,
+    com: f.com, crs: f.crs, cmv: f.cmv, comm1: f.comm1, comm2: f.comm2,
+    lignes: f.lignes.filter(l => l.ps)
+  }));
+}
+async function verifEnregistrer(silencieux) {
+  const jour = verifJour;
+  if (!VERIF_JOURS.includes(jour)) return false;
+  if (!SHEETS_ENABLED) { toast('Brouillon local conservé ✓'); return true; }
+  try {
+    const json = await callASRetry({ action: 'saveVerif', jour, data: JSON.stringify(verifPourEnvoi(jour)) });
+    if (!json.ok) throw new Error(json.error);
+    verifDirty = false;
+    const hh = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    verifSaveInfo = '✓ Enregistré à ' + hh;
+    const st = document.getElementById('vfStatut');
+    if (st) { st.textContent = verifSaveInfo; st.style.color = '#1E8449'; }
+    if (!silencieux) toast('Fiche Vérificateur enregistrée ✓ (' + (json.data.lignes || 0) + ' ligne(s))');
+    return true;
+  } catch (e) {
+    console.error('saveVerif', e);
+    toast('Erreur envoi Sheets — brouillon local conservé', 'err');
+    return false;
+  }
+}
+
+// ── Impression A4 ─────────────────────────────────────────────────────────
+function verifPSParts(label) {
+  const seg = String(label || '').split(' - ').map(x => x.trim()).filter(Boolean), nums = [];
+  while (seg.length && /^\d+(\s*(&|,|et|a|à|bis|\d+))*$/i.test(seg[0])) nums.push(seg.shift());
+  if (!nums.length) return { num: seg.shift() || '', rest: seg.join(' - ') };
+  return { num: nums.join(' - '), rest: seg.join(' - ') };
+}
+function verifPrintHTML(jour) {
+  const jourInfo = JOURS.find(j => j.id === jour);
+  const fiches = (verifFiches[jour] || []).filter(f => f.verificateur || f.tel || f.vehicule || f.lignes.some(l => l.ps));
+  const classe = 'n' + VERIF_LIGNES_MAX;
+  return fiches.map((f, idx) => {
+    const lignes = f.lignes.filter(l => l.ps);
+    const rows = lignes.map(l => {
+      const p = verifPSParts(l.ps);
+      return `<tr><td class="ps${p.num.length > 9 ? ' stk' : ''}"><b>${verifEsc(p.num)}</b><small>${verifEsc(p.rest)}</small></td>
+        <td class="rs">${l.type ? `<span class="${l.type}">${l.type}</span>` : ''}</td>
+        <td class="h">${verifEsc(l.hmep)}</td><td class="c">${verifEsc(l.comm)}</td></tr>`;
+    }).join('');
+    const radios = [f.com ? f.com + ' COM' : '', f.crs ? f.crs + ' CRS' : '', f.cmv ? f.cmv + ' CMV' : ''].filter(Boolean)
+      .map(r => `<span class="pill">${r}</span>`).join(' ') || '—';
+    return `<section class="vp-page ${classe}">
+      <div class="top"><div><h1>VÉRIFICATION MULTI-SECTEURS</h1><div class="sub">ROC D'AZUR 2026 — ${verifEsc(jourInfo.date)} (${jour})</div></div>
+        <div class="fn">${fiches.length > 1 ? 'Fiche ' + (idx + 1) + '/' + fiches.length : ''}</div></div>
+      <div class="hd">
+        <div class="g2"><label>Vérificateur</label><b class="big">${verifEsc(f.verificateur) || '—'}</b></div>
+        <div><label>Téléphone</label><b class="big">${verifEsc(f.tel) || '—'}</b></div>
+        <div><label>H MeP secteur</label><b class="big">${verifEsc(f.hmepSect) || '—'}</b></div>
+        <div><label>Véhicule</label><b class="big">${verifEsc(f.vehicule) || '—'}</b></div>
+        <div class="g2"><label>Radios</label><b class="big">${radios}</b></div>
+      </div>
+      <table><colgroup><col class="k1"><col class="k2"><col class="k3"><col></colgroup><thead><tr><th>N° PS · lieu-dit</th><th>R / S</th><th>H MeP</th><th>Commentaire</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="leg"><b>R</b> = Rubalise &nbsp;&nbsp; <b>S</b> = Signaleur</div>
+      <div class="lib"><div>Commentaire libre :</div>
+        <div class="line">${verifEsc(f.comm1)}</div><div class="line">${verifEsc(f.comm2)}</div></div>
+    </section>`;
+  }).join('');
+}
+async function verifImprimer() {
+  const jour = verifJour;
+  if (!VERIF_JOURS.includes(jour)) { toast('Fiche Vérificateur : choisir un jour de J2 à J5', 'warn'); return; }
+  if (verifDirty) await verifEnregistrer(true);       // enregistre d'abord ; en cas d'échec l'impression continue (brouillon local)
+  const html = verifPrintHTML(jour);
+  if (!html) { toast('Fiche Vérificateur vide — rien à imprimer', 'warn'); return; }
+  document.getElementById('verifPrint').innerHTML = html;
+  document.body.classList.remove('print-fiche-sect', 'print-report', 'print-fiches-ps');
+  document.body.classList.add('print-verif');
+  window.print();
+  setTimeout(() => document.body.classList.remove('print-verif'), 1000);
 }
 
 function renderFicheSecteur() {
