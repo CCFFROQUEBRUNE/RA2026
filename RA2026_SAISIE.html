@@ -1114,7 +1114,7 @@
       <label>Secteur</label>
       <select id="fsSecteurSelect" onchange="renderFicheSecteur()"></select>
       <label style="margin-left:8px">Jour</label>
-      <select id="fsJourSelect" onchange="renderFicheSecteur()"></select>
+      <select id="fsJourSelect" onchange="fsChangeJour()"></select>
       <button class="btn-fiche-print" onclick="imprimerFicheSecteur()">🖨 Imprimer</button>
       <button class="btn-close" onclick="closeFicheSecteur()" style="margin-left:auto">✕</button>
     </div>
@@ -1131,7 +1131,7 @@
       <label>Secteur</label>
       <select id="fpsSecteurSelect" onchange="renderFichesPS()"></select>
       <label style="margin-left:8px">Jour</label>
-      <select id="fpsJourSelect" onchange="renderFichesPS()"></select>
+      <select id="fpsJourSelect" onchange="fpsChangeJour()"></select>
       <button class="btn-fiche-print" onclick="imprimerFichesPS()">🖨 Imprimer</button>
       <button class="btn-close" onclick="closeFichesPS()" style="margin-left:auto">✕</button>
     </div>
@@ -2874,28 +2874,76 @@ function closeReport() {
 // ========================================================
 // FICHE SECTEUR
 // ========================================================
+// ── Regroupement « PS sans secteur » (blocs solo « PS xxx ») pour Fiche Secteur / Fiches PS ──
+const GROUPE_SOLO       = '__SOLO_TOUS__';
+const GROUPE_SOLO_LABEL = '★ PS sans secteur (tous)';
+
+// Blocs solo du jour qui contiennent au moins un PS saisi
+function blocsSoloJour(jourId) {
+  return (state[jourId] || []).filter(sd => estSolo(sd.secteur) && (sd.rows || []).some(r => r.ps));
+}
+
+// Données « virtuelles » du groupe : un seul bloc, lignes triées par n° de PS (le référent de chaque bloc est conservé dans _ref)
+function sectDataGroupeSolo(jourId) {
+  const blocs = blocsSoloJour(jourId);
+  const rows = [];
+  blocs.forEach(sd => (sd.rows || []).filter(r => r.ps).forEach(r =>
+    rows.push(Object.assign({}, r, { _ref: sd.referant || '', _tel: sd.telReferant || '', _sect: sd.secteur }))));
+  rows.sort((a, b) => (parseInt(a.ps, 10) || 0) - (parseInt(b.ps, 10) || 0) || String(a.ps).localeCompare(String(b.ps)));
+  const comms = [];
+  blocs.forEach(sd => (sd.commentaires || []).filter(Boolean).forEach(c => comms.push(c)));
+  return { secteur: 'PS sans secteur', referant: '', telReferant: '', hmepSect: '', commentaires: comms, rows, _groupe: true };
+}
+
+// Données d'un « secteur » pour les fiches : vrai secteur ou groupe virtuel
+function sectDataFiche(secteurNom, jourId) {
+  if (secteurNom === GROUPE_SOLO) return sectDataGroupeSolo(jourId);
+  return (state[jourId] || []).find(s => s.secteur === secteurNom);
+}
+
+// Options du menu secteur pour un jour : groupe ★, secteurs normaux, puis PS sans secteur un par un
+function optionsSecteursFiches(jourId) {
+  const dispos = [...new Set([
+    ...SECTEURS,
+    ...(state[jourId] || []).map(s => s.secteur)
+  ])].filter(s => s !== SOLO_VIDE);
+  const normaux = dispos.filter(s => !estSolo(s));
+  const solos   = dispos.filter(s => estSolo(s) && (state[jourId] || []).some(sd => sd.secteur === s));
+  let h = '';
+  if (blocsSoloJour(jourId).length) h += `<option value="${GROUPE_SOLO}">${GROUPE_SOLO_LABEL}</option>`;
+  h += normaux.map(s => `<option value="${attrEsc(s)}">${s}</option>`).join('');
+  if (solos.length) h += `<optgroup label="PS sans secteur (un par un)">` +
+    solos.map(s => `<option value="${attrEsc(s)}">${s}</option>`).join('') + `</optgroup>`;
+  return h;
+}
+
+// Remplit un menu secteur pour un jour en gardant la sélection si elle existe encore
+function remplirMenuSecteursFiches(selSect, jourId, preferer) {
+  const avant = preferer || selSect.value;
+  selSect.innerHTML = optionsSecteursFiches(jourId);
+  if ([...selSect.options].some(o => o.value === avant)) selSect.value = avant;
+}
+
 function openFicheSecteur() {
   // Remplir les selects
   const selSect = document.getElementById('fsSecteurSelect');
   const selJour = document.getElementById('fsJourSelect');
 
-  // Secteurs présents dans le state du jour courant + tous secteurs connus
-  const secteursDispos = [...new Set([
-    ...SECTEURS,
-    ...(state[currentJour] || []).map(s => s.secteur)
-  ])];
-  selSect.innerHTML = secteursDispos.map(s =>
-    `<option value="${s}">${s}</option>`
-  ).join('');
-  // Pré-sélectionner le premier secteur du jour courant si dispo
-  const premierSect = (state[currentJour] || [])[0];
-  if (premierSect) selSect.value = premierSect.secteur;
-
   selJour.innerHTML = JOURS.map(j =>
     `<option value="${j.id}" ${j.id === currentJour ? 'selected' : ''}>${j.label} — ${j.date}</option>`
   ).join('');
 
+  // Secteurs présents dans le state du jour courant + tous secteurs connus (+ groupe « PS sans secteur »)
+  const premierSect = (state[currentJour] || [])[0];
+  remplirMenuSecteursFiches(selSect, currentJour, premierSect ? premierSect.secteur : '');
+
   document.getElementById('ficheSectOverlay').classList.add('active');
+  renderFicheSecteur();
+}
+
+// Changement de jour : on reconstruit la liste des secteurs de CE jour (les PS sans secteur diffèrent d'un jour à l'autre)
+function fsChangeJour() {
+  remplirMenuSecteursFiches(document.getElementById('fsSecteurSelect'), document.getElementById('fsJourSelect').value);
   renderFicheSecteur();
 }
 
@@ -2926,23 +2974,22 @@ function openFichesPS() {
   const selSect = document.getElementById('fpsSecteurSelect');
   const selJour = document.getElementById('fpsJourSelect');
 
-  // Peupler secteurs
-  const secteursDispos = [...new Set([
-    ...SECTEURS,
-    ...(state[currentJour] || []).map(s => s.secteur)
-  ])];
-  selSect.innerHTML = secteursDispos.map(s =>
-    `<option value="${s}">${s}</option>`
-  ).join('');
-  const premierSect = (state[currentJour] || [])[0];
-  if (premierSect) selSect.value = premierSect.secteur;
-
   // Peupler jours
   selJour.innerHTML = JOURS.map(j =>
     `<option value="${j.id}" ${j.id === currentJour ? 'selected' : ''}>${j.label} — ${j.date}</option>`
   ).join('');
 
+  // Peupler secteurs (+ groupe « PS sans secteur »)
+  const premierSect = (state[currentJour] || [])[0];
+  remplirMenuSecteursFiches(selSect, currentJour, premierSect ? premierSect.secteur : '');
+
   document.getElementById('fichesPSOverlay').classList.add('active');
+  renderFichesPS();
+}
+
+// Changement de jour : liste des secteurs reconstruite pour CE jour
+function fpsChangeJour() {
+  remplirMenuSecteursFiches(document.getElementById('fpsSecteurSelect'), document.getElementById('fpsJourSelect').value);
   renderFichesPS();
 }
 
@@ -2988,7 +3035,7 @@ function renderFichesPS() {
   const jourId     = document.getElementById('fpsJourSelect').value;
 
   // Trouver les données du secteur
-  const sectData = (state[jourId] || []).find(s => s.secteur === secteurNom);
+  const sectData = sectDataFiche(secteurNom, jourId);
   const rows     = sectData ? sectData.rows.filter(r => r.ps) : [];
 
   // Peupler le sélecteur de PS
@@ -2999,7 +3046,7 @@ function renderFichesPS() {
           onclick="fpsTogglePS('${r.ps.replace(/'/g,"\\'")}')">
           ${r.ps.split(' - ')[0] || r.ps}
         </button>`).join('')
-    : `<span style="font-size:12px;color:var(--texte2);font-style:italic">Aucun PS saisi pour ce secteur ce jour</span>`;
+    : `<span style="font-size:12px;color:var(--texte2);font-style:italic">${secteurNom === GROUPE_SOLO ? 'Aucun PS sans secteur saisi ce jour' : 'Aucun PS saisi pour ce secteur ce jour'}</span>`;
 
   // Ajouter CSS boutons PS si pas encore fait
   if (!document.getElementById('fpsBtnStyle')) {
@@ -3032,10 +3079,10 @@ function renderFichesPSCards() {
   const jourInfo   = JOURS.find(j => j.id === jourId);
   const body       = document.getElementById('fichesPSBody');
 
-  const sectData = (state[jourId] || []).find(s => s.secteur === secteurNom);
+  const sectData = sectDataFiche(secteurNom, jourId);
 
   if (!sectData) {
-    body.innerHTML = `<div class="fs-empty">Aucune saisie pour ${secteurNom} en ${jourId}</div>`;
+    body.innerHTML = `<div class="fs-empty">Aucune saisie pour ${secteurNom === GROUPE_SOLO ? 'les PS sans secteur' : secteurNom} en ${jourId}</div>`;
     return;
   }
 
@@ -3046,20 +3093,24 @@ function renderFichesPSCards() {
     return;
   }
 
-  const tel = sectData.telReferant
-    || (REFERANTS.find(r => r.nom === sectData.referant) || {}).tel
-    || '';
+  const groupe = !!sectData._groupe;
+  const telDe = (nomRef, telSaisi) => telSaisi || (REFERANTS.find(r => r.nom === nomRef) || {}).tel || '';
+  const tel0 = telDe(sectData.referant, sectData.telReferant);
   const isGaillarde = secteurNom === 'LA_GAILLARDE';
+  const titreFiches = groupe ? 'PS sans secteur' : (estSolo(secteurNom) ? 'PS sans secteur — ' + secteurNom : secteurNom);
 
   let html = `
-    <div class="fs-titre" style="margin-bottom:2px">FICHES PS — ${secteurNom}</div>
+    <div class="fs-titre" style="margin-bottom:2px">FICHES PS — ${titreFiches}</div>
     <div class="fs-sous-titre">${jourInfo.date} (${jourId}) — ${rows.length} fiche(s) sélectionnée(s)</div>
   `;
 
   rows.forEach((r, idx) => {
     const isLast   = idx === rows.length - 1;
+    const sansSect = groupe || estSolo(secteurNom);               // PS sans secteur : pas de nom de secteur à afficher
+    const refNom   = groupe ? (r._ref || '') : sectData.referant;
+    const tel      = groupe ? telDe(r._ref, r._tel) : tel0;
     const benvs    = [r.b1,r.b2,r.b3,r.b4,r.b5].filter(Boolean);
-    const refPS    = isGaillarde ? (r.b1 || '—') : sectData.referant;
+    const refPS    = isGaillarde ? (r.b1 || '—') : (refNom || '—');
     // Pour LA_GAILLARDE : tel du référent PS = tel de B1 dans la liste bénévoles
     const telB1    = isGaillarde
       ? (BENEVOLES_DATA.find(b => b.nom === r.b1) || {}).tel || '—'
@@ -3077,7 +3128,7 @@ function renderFichesPSCards() {
         <!-- En-tête PS -->
         <div class="fs-section-header" style="font-size:14px;display:flex;align-items:center;gap:12px">
           <span>🗺 ${r.ps}</span>
-          <span style="opacity:.7;font-size:11px">${secteurNom} · ${jourInfo.date}</span>
+          <span style="opacity:.7;font-size:11px">${sansSect ? '' : secteurNom + ' · '}${jourInfo.date}</span>
           <span style="margin-left:auto;font-size:12px">H MeP : <strong style="color:#E67E22">${r.hmep||'—'}</strong></span>
         </div>
 
@@ -3085,7 +3136,7 @@ function renderFichesPSCards() {
           <div class="fs-info-grid">
             <div class="fs-info-item">
               <div class="fs-info-label">Secteur</div>
-              <div class="fs-info-val bleu">${isGaillarde ? '—' : secteurNom}</div>
+              <div class="fs-info-val bleu">${isGaillarde ? '—' : (sansSect ? 'PS sans secteur' : secteurNom)}</div>
             </div>
             <div class="fs-info-item">
               <div class="fs-info-label">Référent ${isGaillarde ? 'PS' : 'secteur'}</div>
@@ -3158,10 +3209,12 @@ function renderFicheSecteur() {
   const jourInfo   = JOURS.find(j => j.id === jourId);
 
   // Trouver les données du secteur pour ce jour
-  const sectData = (state[jourId] || []).find(s => s.secteur === secteurNom);
+  const sectData = sectDataFiche(secteurNom, jourId);
+  const groupe   = !!(sectData && sectData._groupe);
+  const nomAff   = groupe ? 'PS SANS SECTEUR' : secteurNom;
 
   if (!sectData) {
-    body.innerHTML = `<div class="fs-empty">Aucune saisie pour le secteur <strong>${secteurNom}</strong> en ${jourId}.</div>`;
+    body.innerHTML = `<div class="fs-empty">Aucune saisie pour le secteur <strong>${secteurNom === GROUPE_SOLO ? 'PS sans secteur' : secteurNom}</strong> en ${jourId}.</div>`;
     return;
   }
 
@@ -3185,7 +3238,7 @@ function renderFicheSecteur() {
 
   // ── HTML ─────────────────────────────────────────────────────────────────
   let html = `
-    <div class="fs-titre">SECTEUR ${secteurNom}</div>
+    <div class="fs-titre">${groupe ? nomAff : 'SECTEUR ' + secteurNom}</div>
     <div class="fs-sous-titre">
       ROC D'AZUR 2026 — ${jourInfo.date} (${jourId})
     </div>
@@ -3197,11 +3250,11 @@ function renderFicheSecteur() {
         <div class="fs-info-grid">
           <div class="fs-info-item">
             <div class="fs-info-label">Secteur</div>
-            <div class="fs-info-val bleu">${secteurNom}</div>
+            <div class="fs-info-val bleu">${groupe ? 'PS sans secteur' : secteurNom}</div>
           </div>
           <div class="fs-info-item">
             <div class="fs-info-label">Référant</div>
-            <div class="fs-info-val">${sectData.referant || '—'}</div>
+            <div class="fs-info-val">${groupe ? '(voir chaque PS)' : (sectData.referant || '—')}</div>
           </div>
           <div class="fs-info-item">
             <div class="fs-info-label">H MeP Secteur</div>
@@ -3296,7 +3349,7 @@ function renderFicheSecteur() {
 
       html += `
             <tr>
-              <td><strong>${r.ps}</strong></td>
+              <td><strong>${r.ps}</strong>${groupe ? `<br><span style="font-size:10px;color:#555">Réf. : ${r._ref || '—'}</span>` : ''}</td>
               <td><strong style="color:#C0392B">${r.hmep || '—'}</strong></td>
               <td>${r.vehA || '—'}</td>
               <td>${r.vehB || '—'}</td>
