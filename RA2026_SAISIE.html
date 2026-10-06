@@ -3672,7 +3672,7 @@ function renderFicheSecteur() {
             <div class="fs-info-val bleu">${groupe ? 'PS sans secteur' : secteurNom}</div>
           </div>
           <div class="fs-info-item">
-            <div class="fs-info-label">Référant</div>
+            <div class="fs-info-label">Référent</div>
             <div class="fs-info-val">${groupe ? '(voir chaque PS)' : (nomAff(sectData.referant, sectData.secteur) || '—')}</div>
           </div>
           <div class="fs-info-item">
@@ -3686,47 +3686,6 @@ function renderFicheSecteur() {
         </div>
       </div>
     </div>
-
-    <!-- RECAP CHIFFRES -->
-    <div class="fs-section">
-      <div class="fs-section-header">📊 Récapitulatif</div>
-      <div class="fs-section-body">
-        <div class="fs-info-grid">
-          <div class="fs-info-item">
-            <div class="fs-info-label">PS actifs</div>
-            <div class="fs-info-val rouge">${rows.length}</div>
-          </div>
-          <div class="fs-info-item">
-            <div class="fs-info-label">Bénévoles</div>
-            <div class="fs-info-val vert">${totalBenv}</div>
-          </div>
-          <div class="fs-info-item">
-            <div class="fs-info-label">Véhicules</div>
-            <div class="fs-info-val bleu">${vehs.size}</div>
-          </div>
-          <div class="fs-info-item">
-            <div class="fs-info-label">Radios</div>
-            <div class="fs-info-val" style="font-size:12px">
-              ${totalCOM ? `<span style="color:#1A5276;font-weight:700">${totalCOM} COM</span> ` : ''}
-              ${totalCRS ? `<span style="color:#922B21;font-weight:700">${totalCRS} CRS</span> ` : ''}
-              ${totalCMV ? `<span style="color:#1E8449;font-weight:700">${totalCMV} CMV</span>` : ''}
-              ${!totalCOM && !totalCRS && !totalCMV ? '—' : ''}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    ${comms.length ? `
-    <!-- COMMENTAIRES REFERANT -->
-    <div class="fs-section">
-      <div class="fs-section-header">📝 Commentaires pour le référant</div>
-      <div class="fs-section-body">
-        <ul class="fs-comm-list">
-          ${comms.map(c => `<li>${c}</li>`).join('')}
-        </ul>
-      </div>
-    </div>` : ''}
 
     <!-- POINTS SIGNALEURS -->
     <div class="fs-section">
@@ -3787,6 +3746,48 @@ function renderFicheSecteur() {
   html += `
       </div>
     </div>
+
+    ${comms.length ? `
+    <!-- COMMENTAIRES REFERANT -->
+    <div class="fs-section">
+      <div class="fs-section-header">📝 Commentaires pour le référant</div>
+      <div class="fs-section-body">
+        <ul class="fs-comm-list">
+          ${comms.map(c => `<li>${c}</li>`).join('')}
+        </ul>
+      </div>
+    </div>` : ''}
+
+    <!-- RECAP CHIFFRES -->
+    <div class="fs-section">
+      <div class="fs-section-header">📊 Récapitulatif</div>
+      <div class="fs-section-body">
+        <div class="fs-info-grid">
+          <div class="fs-info-item">
+            <div class="fs-info-label">PS actifs</div>
+            <div class="fs-info-val rouge">${rows.length}</div>
+          </div>
+          <div class="fs-info-item">
+            <div class="fs-info-label">Bénévoles</div>
+            <div class="fs-info-val vert">${totalBenv}</div>
+          </div>
+          <div class="fs-info-item">
+            <div class="fs-info-label">Véhicules</div>
+            <div class="fs-info-val bleu">${vehs.size}</div>
+          </div>
+          <div class="fs-info-item">
+            <div class="fs-info-label">Radios</div>
+            <div class="fs-info-val" style="font-size:12px">
+              ${totalCOM ? `<span style="color:#1A5276;font-weight:700">${totalCOM} COM</span> ` : ''}
+              ${totalCRS ? `<span style="color:#922B21;font-weight:700">${totalCRS} CRS</span> ` : ''}
+              ${totalCMV ? `<span style="color:#1E8449;font-weight:700">${totalCMV} CMV</span>` : ''}
+              ${!totalCOM && !totalCRS && !totalCMV ? '—' : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <!-- MISSIONS -->
     <div class="fs-section">
