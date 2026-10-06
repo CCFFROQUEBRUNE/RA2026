@@ -328,7 +328,7 @@ function ouvrirFiche(i) {
       ${l.comm ? `<div class="com">${esc(l.comm)}</div>` : ''}
     </div>`;
   }).join('');
-  const libres = [f.comm1, f.comm2].filter(Boolean);
+  const libres = [f.comm1, f.comm2, f.comm3, f.comm4, f.comm5].filter(Boolean);
   document.getElementById('ficheBody').innerHTML = `
     <div class="entete">
       <div class="jour">${jour.date} (${jour.id})${fichesCourantes.length > 1 ? ' · Fiche ' + (i + 1) + '/' + fichesCourantes.length : ''}</div>
