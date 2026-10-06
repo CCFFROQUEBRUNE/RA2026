@@ -3551,7 +3551,7 @@ async function verifEnregistrer(silencieux) {
   if (!VERIF_JOURS.includes(jour)) return false;
   if (!SHEETS_ENABLED) { toast('Brouillon local conservé ✓'); return true; }
   try {
-    const json = await callASRetry({ action: 'saveVerif', jour, data: JSON.stringify(verifPourEnvoi(jour)) });
+    const json = await callASSave({ action: 'saveVerif', jour, data: JSON.stringify(verifPourEnvoi(jour)) });
     if (!json.ok) throw new Error(json.error);
     verifDirty = false;
     const hh = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -3562,7 +3562,7 @@ async function verifEnregistrer(silencieux) {
     return true;
   } catch (e) {
     console.error('saveVerif', e);
-    toast('Erreur envoi Sheets — brouillon local conservé', 'err');
+    toast('Erreur envoi Sheets après ' + SAVE_TIMEOUTS.length + ' essais — brouillon local conservé, recliquez sur Sauvegarder', 'err');
     return false;
   }
 }
@@ -3809,13 +3809,14 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxn5wLvHEiVHduu
 const SHEETS_ENABLED  = APPS_SCRIPT_URL !== 'REMPLACER_PAR_URL_APPS_SCRIPT';
 
 // ── Appel Apps Script via JSONP (contourne les limitations CORS/redirect) ──
-function callAS(params) {
+function callAS(params, timeoutMs = 90000) {
   return new Promise((resolve, reject) => {
     const cbName = 'cb_' + Math.random().toString(36).slice(2);
     const timeout = setTimeout(() => {
-      delete window[cbName];
-      reject(new Error('Timeout (45s) — connexion lente ?'));
-    }, 90000); // 90s pour ADSL
+      // handler neutre : une réponse tardive ne provoque pas d'erreur dans la console
+      window[cbName] = () => { delete window[cbName]; };
+      reject(new Error('Timeout (' + Math.round(timeoutMs / 1000) + 's) — connexion lente ?'));
+    }, timeoutMs);
     window[cbName] = (data) => {
       clearTimeout(timeout);
       delete window[cbName];
@@ -3826,7 +3827,7 @@ function callAS(params) {
     s.src    = `${APPS_SCRIPT_URL}?${qs}`;
    s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
     document.head.appendChild(s);
-    setTimeout(() => s.remove(), 95000);
+    setTimeout(() => s.remove(), timeoutMs + 5000);
   });
 }
 
@@ -3841,6 +3842,25 @@ async function callASRetry(params, maxRetries = 2) {
       await new Promise(r => setTimeout(r, 2000));
     }
   }
+}
+
+// Envoi d'une SAUVEGARDE : délai court par essai + relances rapides.
+// Sans risque : saveSaisie réécrit la journée entière (idempotent) et le serveur traite les envois l'un après l'autre (verrou).
+// Le serveur répond en 1 à 4 s ; si la réponse ne revient pas en ~20 s, elle s'est perdue → on relance tout de suite.
+const SAVE_TIMEOUTS = [20000, 25000, 40000];
+async function callASSave(params, onEssai) {
+  let derniere;
+  for (let i = 0; i < SAVE_TIMEOUTS.length; i++) {
+    if (onEssai) onEssai(i + 1, SAVE_TIMEOUTS.length);
+    try {
+      return await callAS(params, SAVE_TIMEOUTS[i]);
+    } catch(e) {
+      derniere = e;
+      console.warn('Envoi : essai ' + (i + 1) + '/' + SAVE_TIMEOUTS.length + ' sans réponse', e.message);
+      if (i < SAVE_TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  throw derniere;
 }
 
 // Charge les référentiels depuis Sheets au démarrage
@@ -4068,14 +4088,19 @@ async function saveToSheets() {
   const jour     = currentJour;
   const secteurs = state[jour] || [];
   let psOk = false;
+  const t0 = Date.now();
+  let essais = 1;
 
   try {
     // Envoyer TOUS les secteurs du jour en un seul appel
     // Apps Script supprime toutes les lignes du jour et réécrit → gère les suppressions
-    const jsonSaisie = await callASRetry({
+    const jsonSaisie = await callASSave({
       action: 'saveSaisie',
       jour,
       data: JSON.stringify(secteurs),
+    }, (n, max) => {
+      essais = n;
+      if (n > 1) { etat('⏳ Envoi… essai ' + n + '/' + max); toast('Connexion lente — relance automatique (essai ' + n + '/' + max + ')…', 'warn'); }
     });
     if (!jsonSaisie.ok) throw new Error(jsonSaisie.error);
     psOk = true;
@@ -4083,7 +4108,8 @@ async function saveToSheets() {
     if (jsonSaisie.data && jsonSaisie.data.coursesManquantes) {
       toast('⚠ PS sauvegardés, MAIS la colonne « COURSES » manque dans l\'onglet SAISIE (ligne 2) : les courses choisies ne sont pas enregistrées', 'warn');
     } else {
-      toast('Sheets mis à jour ✓ (' + (jsonSaisie.data.inserted || 0) + ' PS sauvegardés)');
+      const dur = ((Date.now() - t0) / 1000).toFixed(1).replace('.', ',');
+      toast('Sheets mis à jour ✓ (' + (jsonSaisie.data.inserted || 0) + ' PS sauvegardés — ' + dur + ' s' + (essais > 1 ? ', ' + essais + ' essais' : '') + ')', essais > 1 ? 'warn' : '');
     }
   } catch(e) {
     toast('Erreur envoi Sheets — brouillon local conservé', 'err');
@@ -4103,11 +4129,11 @@ async function saveCommentairesArrierePlan(jour, secteurs) {
     .map(s => ({ secteur: s.secteur, commentaires: s.commentaires }));
   if (!items.length) return;
   try {
-    const j = await callASRetry({ action: 'saveCommentairesJour', jour, data: JSON.stringify(items) });
+    const j = await callASSave({ action: 'saveCommentairesJour', jour, data: JSON.stringify(items) });
     if (j.ok) return;
     if (!/Action inconnue/i.test(String(j.error || ''))) throw new Error(j.error);
     for (const it of items) {                       // ancien Apps Script : repli
-      await callASRetry({ action: 'saveCommentaires', jour, secteur: it.secteur, data: JSON.stringify(it.commentaires) });
+      await callASSave({ action: 'saveCommentaires', jour, secteur: it.secteur, data: JSON.stringify(it.commentaires) });
     }
   } catch(e) {
     console.warn('saveCommentaires:', e.message);
