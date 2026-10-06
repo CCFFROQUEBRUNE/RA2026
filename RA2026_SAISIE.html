@@ -4049,6 +4049,8 @@ async function loadSaisieFromSheets(jour) {
 
 // Sauvegarde vers Sheets — envoie TOUS les secteurs du jour en un seul appel
 // Cela permet de supprimer correctement les secteurs retirés de l'interface
+let saveEnCours = false;   // un seul enregistrement à la fois (évite les envois parallèles qui se marchent dessus)
+
 async function saveToSheets() {
   try { localStorage.setItem('ra2026_saisie', JSON.stringify(state)); } catch(e) {}
   if (!SHEETS_ENABLED) { toast('Brouillon local sauvegardé ✓'); return; }
@@ -4056,38 +4058,27 @@ async function saveToSheets() {
     toast('Listes Secteurs/Véhicules non chargées — sauvegarde Sheets bloquée (brouillon local conservé)', 'err');
     return;
   }
+  if (saveEnCours) { toast('Enregistrement déjà en cours — patientez…', 'warn'); return; }
+  saveEnCours = true;
 
   const btn = document.querySelector('.btn-pdf');
-  if (btn) { btn.textContent = '⏳ Envoi…'; btn.disabled = true; }
+  const etat = (txt) => { if (btn) { btn.textContent = txt; btn.disabled = true; } };
+  etat('⏳ Envoi des PS…');
+
+  const jour     = currentJour;
+  const secteurs = state[jour] || [];
+  let psOk = false;
 
   try {
-    const secteurs = state[currentJour] || [];
-
     // Envoyer TOUS les secteurs du jour en un seul appel
     // Apps Script supprime toutes les lignes du jour et réécrit → gère les suppressions
     const jsonSaisie = await callASRetry({
       action: 'saveSaisie',
-      jour: currentJour,
+      jour,
       data: JSON.stringify(secteurs),
     });
-
     if (!jsonSaisie.ok) throw new Error(jsonSaisie.error);
-
-    // Commentaires secteur par secteur
-    for (const s of secteurs) {
-      if (s.commentaires && s.commentaires.some(Boolean)) {
-        try {
-          await callASRetry({
-            action: 'saveCommentaires',
-            jour: currentJour,
-            secteur: s.secteur,
-            data: JSON.stringify(s.commentaires),
-          });
-        } catch(e) {
-          console.warn('saveCommentaires timeout:', s.secteur, e.message);
-        }
-      }
-    }
+    psOk = true;
 
     if (jsonSaisie.data && jsonSaisie.data.coursesManquantes) {
       toast('⚠ PS sauvegardés, MAIS la colonne « COURSES » manque dans l\'onglet SAISIE (ligne 2) : les courses choisies ne sont pas enregistrées', 'warn');
@@ -4098,7 +4089,29 @@ async function saveToSheets() {
     toast('Erreur envoi Sheets — brouillon local conservé', 'err');
     console.error('Sheets save error:', e);
   } finally {
+    // Le bouton est libéré dès que les PS sont traités : les commentaires partent ensuite en arrière-plan
+    saveEnCours = false;
     if (btn) { btn.textContent = '💾 Sauvegarder'; btn.disabled = false; }
+  }
+
+  if (psOk) saveCommentairesArrierePlan(jour, secteurs);
+}
+
+// Commentaires secteur : un seul appel pour tout le jour ; repli secteur par secteur si le serveur est encore ancien
+async function saveCommentairesArrierePlan(jour, secteurs) {
+  const items = secteurs.filter(s => s.commentaires && s.commentaires.some(Boolean))
+    .map(s => ({ secteur: s.secteur, commentaires: s.commentaires }));
+  if (!items.length) return;
+  try {
+    const j = await callASRetry({ action: 'saveCommentairesJour', jour, data: JSON.stringify(items) });
+    if (j.ok) return;
+    if (!/Action inconnue/i.test(String(j.error || ''))) throw new Error(j.error);
+    for (const it of items) {                       // ancien Apps Script : repli
+      await callASRetry({ action: 'saveCommentaires', jour, secteur: it.secteur, data: JSON.stringify(it.commentaires) });
+    }
+  } catch(e) {
+    console.warn('saveCommentaires:', e.message);
+    toast('⚠ Les PS sont enregistrés, mais pas les commentaires secteur — cliquez de nouveau sur Sauvegarder', 'warn');
   }
 }
 
