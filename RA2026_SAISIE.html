@@ -633,7 +633,7 @@
   .vf-head { display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:8px; color:#1A3A5C; }
   .vf-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px 12px; }
   .vf-grid label { font-size:11px; text-transform:uppercase; color:#666; display:flex; flex-direction:column; gap:2px; }
-  .vf-grid .vf-w2 { grid-column:span 2; } .vf-grid .vf-w4 { grid-column:span 3; }
+  .vf-grid .vf-w2 { grid-column:span 2; } .vf-grid .vf-w4 { grid-column:span 3; } .vf-grid .vf-w6 { grid-column:1 / -1; }
   .vf-grid select, .vf-grid input, .vf-table select, .vf-table input { font-size:13px; padding:4px 6px; border:1px solid #bbb; border-radius:4px; width:100%; box-sizing:border-box; text-transform:none; }
   .vf-table { width:100%; border-collapse:collapse; margin-top:10px; }
   .vf-table th { font-size:11px; text-align:left; color:#666; padding:2px 4px; border-bottom:2px solid #1A3A5C; }
@@ -977,14 +977,15 @@
     #verifPrint .rs .S { background:#fff; color:#000; }
     #verifPrint .h { font-size:17pt; font-weight:700; text-align:center; }
     #verifPrint .c { font-size:12.5pt; white-space:nowrap; text-overflow:ellipsis; }
-    #verifPrint .n25 td { height:7.2mm; }
-    #verifPrint .n25 .ps b { font-size:19pt; }
+    #verifPrint .n25 td { height:6.3mm; }
+    #verifPrint .n25 .ps b { font-size:17pt; line-height:1.05; }
+    #verifPrint .n25 .rs span { font-size:15pt; width:10mm; } #verifPrint .n25 .h { font-size:15.5pt; } #verifPrint .n25 .c { font-size:12pt; }
     #verifPrint .n30 td { height:6.3mm; }
     #verifPrint .n30 .ps b { font-size:16pt; } #verifPrint .n30 .ps small { font-size:8pt; }
     #verifPrint .n30 .rs span { font-size:14pt; width:9mm; } #verifPrint .n30 .h { font-size:14pt; } #verifPrint .n30 .c { font-size:11pt; }
-    #verifPrint .leg { font-size:11pt; margin-top:1.5mm; }
-    #verifPrint .lib { margin-top:auto; font-size:9pt; }
-    #verifPrint .line { border-bottom:.3mm solid #000; height:7.5mm; font-size:12pt; }
+    #verifPrint .leg { font-size:10.5pt; margin-top:1mm; }
+    #verifPrint .lib { margin-top:auto; font-size:8pt; line-height:1.1; }
+    #verifPrint .line { border-bottom:.3mm solid #000; height:6.8mm; line-height:6.8mm; font-size:11.5pt; white-space:nowrap; overflow:hidden; }
   }
 </style>
 </head>
@@ -3313,7 +3314,7 @@ let verifDirty = false, verifSaveInfo = '';
 function verifEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function verifFicheVide() {
-  return { verificateur:'', tel:'', hmepSect:'', vehicule:'', com:0, crs:0, cmv:0, comm1:'', comm2:'',
+  return { verificateur:'', tel:'', hmepSect:'', vehicule:'', com:0, crs:0, cmv:0, comm1:'', comm2:'', comm3:'', comm4:'', comm5:'',
            lignes: Array.from({length: VERIF_LIGNES_MAX}, () => ({ ps:'', comm:'', type:'', hmep:'' })) };
 }
 // Complète une fiche reçue du serveur jusqu'à VERIF_LIGNES_MAX lignes (les PS saisis restent en tête)
@@ -3321,7 +3322,7 @@ function verifNormaliser(f) {
   const base = verifFicheVide();
   const out = Object.assign(base, {
     verificateur: f.verificateur || '', tel: f.tel || '', hmepSect: f.hmepSect || '', vehicule: f.vehicule || '',
-    com: +f.com || 0, crs: +f.crs || 0, cmv: +f.cmv || 0, comm1: f.comm1 || '', comm2: f.comm2 || ''
+    com: +f.com || 0, crs: +f.crs || 0, cmv: +f.cmv || 0, comm1: f.comm1 || '', comm2: f.comm2 || '', comm3: f.comm3 || '', comm4: f.comm4 || '', comm5: f.comm5 || ''
   });
   (f.lignes || []).slice(0, VERIF_LIGNES_MAX).forEach((l, i) => {
     out.lignes[i] = { ps: l.ps || '', comm: l.comm || '', type: (l.type === 'R' || l.type === 'S') ? l.type : '', hmep: l.hmep || '' };
@@ -3524,6 +3525,9 @@ function verifRender(garderScroll) {
       <div class="vf-grid" style="margin-top:8px">
         <label class="vf-w4">Commentaire libre 1 <input type="text" maxlength="110" value="${attrEsc(f.comm1)}" oninput="verifSet(${fi},'comm1',this.value)"></label>
         <label class="vf-w4">Commentaire libre 2 <input type="text" maxlength="110" value="${attrEsc(f.comm2)}" oninput="verifSet(${fi},'comm2',this.value)"></label>
+        <label class="vf-w6">Commentaire 3 <input type="text" maxlength="110" value="${attrEsc(f.comm3)}" oninput="verifSet(${fi},'comm3',this.value)"></label>
+        <label class="vf-w6">Commentaire 4 <input type="text" maxlength="110" value="${attrEsc(f.comm4)}" oninput="verifSet(${fi},'comm4',this.value)"></label>
+        <label class="vf-w6">Commentaire 5 <input type="text" maxlength="110" value="${attrEsc(f.comm5)}" oninput="verifSet(${fi},'comm5',this.value)"></label>
       </div>
     </div>`;
   });
@@ -3542,7 +3546,7 @@ function verifRender(garderScroll) {
 function verifPourEnvoi(jour) {
   return (verifFiches[jour] || []).map(f => ({
     verificateur: f.verificateur, tel: f.tel, hmepSect: f.hmepSect, vehicule: f.vehicule,
-    com: f.com, crs: f.crs, cmv: f.cmv, comm1: f.comm1, comm2: f.comm2,
+    com: f.com, crs: f.crs, cmv: f.cmv, comm1: f.comm1, comm2: f.comm2, comm3: f.comm3, comm4: f.comm4, comm5: f.comm5,
     lignes: f.lignes.filter(l => l.ps)
   }));
 }
@@ -3601,7 +3605,7 @@ function verifPrintHTML(jour) {
       <table><colgroup><col class="k1"><col class="k2"><col class="k3"><col></colgroup><thead><tr><th>N° PS · lieu-dit</th><th>R / S</th><th>H MeP</th><th>Commentaire</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="leg"><b>R</b> = Rubalise &nbsp;&nbsp; <b>S</b> = Signaleur</div>
       <div class="lib"><div>Commentaire libre :</div>
-        <div class="line">${verifEsc(f.comm1)}</div><div class="line">${verifEsc(f.comm2)}</div></div>
+        ${[f.comm1, f.comm2, f.comm3, f.comm4, f.comm5].map(c => `<div class="line">${verifEsc(c)}</div>`).join('')}</div>
     </section>`;
   }).join('');
 }
