@@ -1084,22 +1084,36 @@
     });
     validerBtn.disabled = saisi.length < 4;
   }
-  function _soumettre() {
+  // Relances automatiques (v29) : si Google ne livre pas la réponse, on retente sans effacer le code saisi.
+  function _soumettre(essai) {
+    essai = (typeof essai === 'number') ? essai : 1;
+    var NB_ESSAIS = 4;
     if (saisi.length < 4) return;
+    var pin = saisi;
     _setLoading(true);
+    chargEl.textContent = essai > 1 ? 'Vérification… (nouvel essai ' + essai + '/' + NB_ESSAIS + ')' : 'Vérification…';
     // JSONP direct (callASRetry pas encore déclaré à ce stade du DOM)
     var cbName = 'pinCb_' + Math.random().toString(36).slice(2);
-    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 90000); // 90s cold start
+    var fini = false, timer = null;
+    var s = document.createElement('script');
+    function echec(msg) {
+      if (fini) return; fini = true;
+      clearTimeout(timer);
+      window[cbName] = function(){ try{ delete window[cbName]; }catch(e){} };   // réponse tardive : ignorée sans erreur
+      try{ s.remove(); }catch(e){}
+      if (essai < NB_ESSAIS) setTimeout(function(){ _soumettre(essai + 1); }, 1000);
+      else _onError(msg);
+    }
+    timer = setTimeout(function(){ echec('Timeout réseau — réessayez'); }, essai === 1 ? 20000 : 30000);
     window[cbName] = function(data) {
+      if (fini) return; fini = true;
       clearTimeout(timer); delete window[cbName]; _setLoading(false);
       if (data.ok) { sessionStorage.setItem(SESSION_KEY,'1'); _cacher(); }
       else { erreurEl.textContent='Code incorrect. Réessayez.'; _shake(); saisi=''; _maj(); }
     };
-    var s = document.createElement('script');
-    s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(saisi) + '&callback=' + cbName;
-    s.onerror = function(){ clearTimeout(timer); delete window[cbName]; _onError('Erreur réseau'); };
+    s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(pin) + '&callback=' + cbName;
+    s.onerror = function(){ echec('Erreur réseau'); };
     document.head.appendChild(s);
-    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 95000);
   }
   function _onError(msg){ _setLoading(false); erreurEl.textContent=msg; saisi=''; _maj(); }
   function _cacher()    { if (overlay) overlay.style.display='none'; }
@@ -3814,7 +3828,7 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxn5wLvHEiVHduu
 const SHEETS_ENABLED  = APPS_SCRIPT_URL !== 'REMPLACER_PAR_URL_APPS_SCRIPT';
 
 // ── Appel Apps Script via JSONP (contourne les limitations CORS/redirect) ──
-function callAS(params, timeoutMs = 90000) {
+function callAS(params, timeoutMs = 90000, rapide = false) {
   return new Promise((resolve, reject) => {
     const cbName = 'cb_' + Math.random().toString(36).slice(2);
     const timeout = setTimeout(() => {
@@ -3830,7 +3844,14 @@ function callAS(params, timeoutMs = 90000) {
     const qs = new URLSearchParams({ ...params, callback: cbName });
     const s  = document.createElement('script');
     s.src    = `${APPS_SCRIPT_URL}?${qs}`;
-   s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
+   s.onerror = () => {
+      if (!rapide) { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); return; }
+      // Lecture / enregistrement : Google n'a pas livré la réponse → on abandonne tout de suite (la relance part aussitôt)
+      console.warn('JSONP onerror — réponse non livrée, relance immédiate');
+      clearTimeout(timeout);
+      window[cbName] = () => { delete window[cbName]; };
+      reject(new Error('Réponse non livrée par Google'));
+    };
     document.head.appendChild(s);
     setTimeout(() => s.remove(), timeoutMs + 5000);
   });
@@ -3852,13 +3873,13 @@ async function callASRetry(params, maxRetries = 2) {
 // Envoi d'une SAUVEGARDE : délai court par essai + relances rapides.
 // Sans risque : saveSaisie réécrit la journée entière (idempotent) et le serveur traite les envois l'un après l'autre (verrou).
 // Le serveur répond en 1 à 4 s ; si la réponse ne revient pas en ~20 s, elle s'est perdue → on relance tout de suite.
-const SAVE_TIMEOUTS = [20000, 25000, 40000];
+const SAVE_TIMEOUTS = [20000, 25000, 30000, 40000];
 async function callASSave(params, onEssai) {
   let derniere;
   for (let i = 0; i < SAVE_TIMEOUTS.length; i++) {
     if (onEssai) onEssai(i + 1, SAVE_TIMEOUTS.length);
     try {
-      return await callAS(params, SAVE_TIMEOUTS[i]);
+      return await callAS(params, SAVE_TIMEOUTS[i], true);
     } catch(e) {
       derniere = e;
       console.warn('Envoi : essai ' + (i + 1) + '/' + SAVE_TIMEOUTS.length + ' sans réponse', e.message);
@@ -3869,13 +3890,13 @@ async function callASSave(params, onEssai) {
 }
 
 // Lecture de données : même principe que l'envoi (réponse perdue → relance rapide), la lecture ne modifie rien.
-// 1er essai 30 s (Google peut mettre 5 à 10 s quand il est lent), puis 40 s, puis 60 s.
-const LIRE_TIMEOUTS = [30000, 40000, 60000];
+// 5 essais : 18 s (le serveur répond en 1 à 5 s, 12 s au pire constaté), puis 20, 25, 30 et 45 s ; une réponse non livrée relance aussitôt.
+const LIRE_TIMEOUTS = [18000, 20000, 25000, 30000, 45000];
 async function callASLire(params) {
   let derniere;
   for (let i = 0; i < LIRE_TIMEOUTS.length; i++) {
     try {
-      return await callAS(params, LIRE_TIMEOUTS[i]);
+      return await callAS(params, LIRE_TIMEOUTS[i], true);
     } catch(e) {
       derniere = e;
       console.warn('Lecture ' + params.action + ' : essai ' + (i + 1) + '/' + LIRE_TIMEOUTS.length + ' sans réponse', e.message);
@@ -4058,10 +4079,9 @@ async function loadSaisieFromSheets(jour) {
   if (!SHEETS_ENABLED) return;
   try {
     showLoadingBanner(`Chargement saisie ${jour} depuis Google Sheets…`);
-    const [jsonSaisie, jsonComm] = await Promise.all([
-      callASLire({ action: 'getSaisie', jour }),
-      callASLire({ action: 'getCommentaires', jour }),
-    ]);
+    // Les deux lectures partent l'une après l'autre (et non en parallèle) : Google laisse tomber plus souvent des requêtes simultanées
+    const jsonSaisie = await callASLire({ action: 'getSaisie', jour });
+    const jsonComm   = await callASLire({ action: 'getCommentaires', jour });
     hideLoadingBanner();
     if (!jsonSaisie.ok) {
       console.warn('getSaisie error:', jsonSaisie.error);
