@@ -3868,13 +3868,30 @@ async function callASSave(params, onEssai) {
   throw derniere;
 }
 
+// Lecture de données : même principe que l'envoi (réponse perdue → relance rapide), la lecture ne modifie rien.
+// 1er essai 30 s (Google peut mettre 5 à 10 s quand il est lent), puis 40 s, puis 60 s.
+const LIRE_TIMEOUTS = [30000, 40000, 60000];
+async function callASLire(params) {
+  let derniere;
+  for (let i = 0; i < LIRE_TIMEOUTS.length; i++) {
+    try {
+      return await callAS(params, LIRE_TIMEOUTS[i]);
+    } catch(e) {
+      derniere = e;
+      console.warn('Lecture ' + params.action + ' : essai ' + (i + 1) + '/' + LIRE_TIMEOUTS.length + ' sans réponse', e.message);
+      if (i < LIRE_TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  throw derniere;
+}
+
 // Charge les référentiels depuis Sheets au démarrage
 async function loadReferentiels() {
   if (!SHEETS_ENABLED) return;
   try {
     showLoadingBanner('Chargement des référentiels depuis Google Sheets…');
     const jourChargement = currentJour;
-    const json = await callASRetry({ action: 'getReferentiels', jour: jourChargement });
+    const json = await callASLire({ action: 'getReferentiels', jour: jourChargement });
     if (!json.ok) throw new Error(json.error);
     const d = json.data;
 
@@ -4042,8 +4059,8 @@ async function loadSaisieFromSheets(jour) {
   try {
     showLoadingBanner(`Chargement saisie ${jour} depuis Google Sheets…`);
     const [jsonSaisie, jsonComm] = await Promise.all([
-      callASRetry({ action: 'getSaisie', jour }),
-      callASRetry({ action: 'getCommentaires', jour }),
+      callASLire({ action: 'getSaisie', jour }),
+      callASLire({ action: 'getCommentaires', jour }),
     ]);
     hideLoadingBanner();
     if (!jsonSaisie.ok) {
