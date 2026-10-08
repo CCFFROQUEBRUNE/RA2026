@@ -129,6 +129,12 @@
   .secteur-badge.ts { background: rgba(192,57,43,0.25); color: var(--rouge-vif); }
   .secteur-badge.lg { background: rgba(183,149,11,0.25); color: var(--or-clair); }
 
+  /* Mode bêta : boutons grisés */
+  .source-btn:disabled, .jour-btn:disabled { opacity: .3; cursor: not-allowed; pointer-events: none; filter: grayscale(1); }
+  #betaBandeau { display: none; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+    letter-spacing: 1px; color: var(--jaune-clair); background: rgba(210,153,34,.12); border: 1px solid rgba(227,179,65,.35);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 16px; }
+
   /* Bannière de chargement */
   #loadingBanner {
     display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 999;
@@ -185,6 +191,20 @@
     font-family: 'Barlow Condensed', sans-serif;
     font-size: .9rem; color: #ff6b6b; min-height: 1.2em; margin: 0 0 1rem;
   }
+  #pin-input {
+    width: 100%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2);
+    border-radius: 10px; color: #fff; padding: 14px 12px; margin-bottom: .6rem;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 1.8rem; font-weight: 700;
+    letter-spacing: .18em; text-align: center; text-transform: uppercase; outline: none; -webkit-appearance: none;
+  }
+  #pin-input::placeholder { font-size: 1rem; letter-spacing: .08em; font-weight: 600; color: rgba(255,255,255,.4); }
+  #pin-input:focus { border-color: var(--rouge-vif); background: rgba(192,57,43,.1); }
+  #pin-valider {
+    width: 100%; padding: 14px; border-radius: 10px; border: 1px solid var(--rouge-vif);
+    background: var(--rouge); color: #fff; cursor: pointer;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 1.2rem; font-weight: 900; letter-spacing: .12em;
+  }
+  #pin-valider:disabled { opacity: .45; cursor: default; }
   #pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
   .pin-key {
     font-family: 'Barlow Condensed', sans-serif; font-size: 1.4rem; font-weight: 600;
@@ -228,32 +248,11 @@
       </svg>
     </div>
     <p id="pin-titre">ROC D'AZUR 2026</p>
-    <p id="pin-sous-titre">Accès sécurisé — saisissez le code</p>
-    <div id="pin-dots">
-      <span class="dot" id="d0"></span>
-      <span class="dot" id="d1"></span>
-      <span class="dot" id="d2"></span>
-      <span class="dot" id="d3"></span>
-      <span class="dot dot-extra" id="d4"></span>
-      <span class="dot dot-extra" id="d5"></span>
-      <span class="dot dot-extra" id="d6"></span>
-      <span class="dot dot-extra" id="d7"></span>
-    </div>
+    <p id="pin-sous-titre">Accès sécurisé — saisissez votre code</p>
+    <input id="pin-input" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off"
+      spellcheck="false" maxlength="16" placeholder="Code d'accès" aria-label="Code d'accès">
     <p id="pin-erreur" aria-live="polite"></p>
-    <div id="pin-pad">
-      <button class="pin-key" data-v="1">1</button>
-      <button class="pin-key" data-v="2">2</button>
-      <button class="pin-key" data-v="3">3</button>
-      <button class="pin-key" data-v="4">4</button>
-      <button class="pin-key" data-v="5">5</button>
-      <button class="pin-key" data-v="6">6</button>
-      <button class="pin-key" data-v="7">7</button>
-      <button class="pin-key" data-v="8">8</button>
-      <button class="pin-key" data-v="9">9</button>
-      <button class="pin-key pin-key--efface" id="pin-efface" title="Effacer">⌫</button>
-      <button class="pin-key" data-v="0">0</button>
-      <button class="pin-key pin-key--ok" id="pin-valider" title="Valider" disabled>OK</button>
-    </div>
+    <button id="pin-valider" type="button">VALIDER</button>
     <p id="pin-chargement" hidden>Vérification…</p>
   </div>
 </div>
@@ -261,70 +260,106 @@
 <!-- Script PIN — fiche.html -->
 <script>
 // ============================================================
-// MODULE PIN — RA2026 — fiche.html
+// MODULE CODE D'ACCÈS — RA2026 — fiche.html
+//  • code complet (celui de saisie.html, vérifié par Apps Script) → accès à tout
+//  • code bêta (alphanumérique, vérifié ici par empreinte SHA-256) → Tous Secteurs, J4 uniquement
 // ============================================================
 (function () {
   'use strict';
   var AS_URL      = 'https://script.google.com/macros/s/AKfycbxn5wLvHEiVHduurSgdUL51dV6KIn18oOYD40jEEN5EOJdxUA5WRApXkwihnrES9wPP/exec';
   var SESSION_KEY = 'pinOk';
-  var saisi       = '';
+  var NIVEAU_KEY  = 'ficheNiveau';
+  var HASH_BETA   = '0c3b173c53a997ccc15d8f920de11efcc1e66b3b1298ff47a782e21c8c119543';
   var overlay     = document.getElementById('pin-overlay');
+  var inputEl     = document.getElementById('pin-input');
   var validerBtn  = document.getElementById('pin-valider');
-  var effaceBtn   = document.getElementById('pin-efface');
   var erreurEl    = document.getElementById('pin-erreur');
   var chargEl     = document.getElementById('pin-chargement');
-  var padEl       = document.getElementById('pin-pad');
-  var dots        = document.querySelectorAll('.dot');
+  var encours     = false;
+
+  // SHA-256 (synchrone, indépendant du contexte https)
+  function sha256(str) {
+    var utf8 = unescape(encodeURIComponent(str)), l = utf8.length, i, j;
+    var K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    var w = [];
+    for (i = 0; i < l; i++) w[i >> 2] |= utf8.charCodeAt(i) << (24 - (i % 4) * 8);
+    w[l >> 2] |= 0x80 << (24 - (l % 4) * 8);
+    var nbw = (((l + 8) >> 6) + 1) * 16;
+    for (i = 0; i < nbw; i++) if (w[i] === undefined) w[i] = 0;
+    w[nbw - 1] = l * 8;
+    function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
+    for (var off = 0; off < nbw; off += 16) {
+      var W = w.slice(off, off + 16), a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (j = 0; j < 64; j++) {
+        if (j >= 16) {
+          var s0 = rotr(W[j-15], 7) ^ rotr(W[j-15], 18) ^ (W[j-15] >>> 3);
+          var s1 = rotr(W[j-2], 17) ^ rotr(W[j-2], 19) ^ (W[j-2] >>> 10);
+          W[j] = (W[j-16] + s0 + W[j-7] + s1) | 0;
+        }
+        var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[j] + W[j]) | 0;
+        var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), mj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + mj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(function (x) { return ('00000000' + (x >>> 0).toString(16)).slice(-8); }).join('');
+  }
 
   // Session déjà validée → masquer immédiatement
   if (sessionStorage.getItem(SESSION_KEY) === '1') { _cacher(); return; }
 
-  padEl.addEventListener('click', function (e) {
-    var btn = e.target.closest('.pin-key');
-    if (!btn || btn.disabled) return;
-    if (btn === effaceBtn)       _effacer();
-    else if (btn === validerBtn) _soumettre();
-    else                         _ajouter(btn.dataset.v);
-  });
+  inputEl.addEventListener('input', function () { erreurEl.textContent = ''; validerBtn.disabled = inputEl.value.trim().length < 4; });
+  inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') _soumettre(); });
+  validerBtn.addEventListener('click', _soumettre);
+  validerBtn.disabled = true;
+  setTimeout(function () { try { inputEl.focus(); } catch (e) {} }, 100);
 
-  document.addEventListener('keydown', function (e) {
-    if (overlay.style.display === 'none') return;
-    if (e.key >= '0' && e.key <= '9') _ajouter(e.key);
-    else if (e.key === 'Backspace')    _effacer();
-    else if (e.key === 'Enter')        _soumettre();
-  });
-
-  function _ajouter(c) { if (saisi.length < 8) { saisi += c; _maj(); } }
-  function _effacer()  { if (saisi.length) { saisi = saisi.slice(0,-1); erreurEl.textContent=''; _maj(); } }
-  function _maj() {
-    dots.forEach(function(d, i) {
-      d.classList.toggle('active', i < saisi.length);
-      if (d.classList.contains('dot-extra')) {
-        d.classList.toggle('visible', saisi.length > i);
-      }
+  // Appel JSONP unique : une réponse non livrée par Google (onerror) échoue tout de suite pour relancer vite
+  function _verifServeur(code, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var cbName = 'pinCbF_' + Math.random().toString(36).slice(2), fini = false;
+      var timer = setTimeout(function () { fin(); window[cbName] = function () { delete window[cbName]; }; reject(new Error('Timeout')); }, timeoutMs);
+      function fin() { fini = true; clearTimeout(timer); try { s.remove(); } catch (e) {} }
+      window[cbName] = function (data) { if (fini) return; fin(); delete window[cbName]; resolve(data); };
+      var s = document.createElement('script');
+      s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(code) + '&callback=' + cbName;
+      s.onerror = function () { if (fini) return; fin(); window[cbName] = function () { delete window[cbName]; }; reject(new Error('Réponse non livrée')); };
+      document.head.appendChild(s);
     });
-    validerBtn.disabled = saisi.length < 4;
   }
-  function _soumettre() {
-    if (saisi.length < 4) return;
-    _setLoading(true);
-    var cbName = 'pinCbF_' + Math.random().toString(36).slice(2);
-    var timer  = setTimeout(function(){ delete window[cbName]; _onError('Timeout réseau — réessayez'); }, 90000); // 90s cold start
-    window[cbName] = function(data) {
-      clearTimeout(timer); delete window[cbName]; _setLoading(false);
-      if (data.ok) { sessionStorage.setItem(SESSION_KEY,'1'); _cacher(); }
-      else { erreurEl.textContent='Code incorrect. Réessayez.'; _shake(); saisi=''; _maj(); }
-    };
-    var s = document.createElement('script');
-    s.src = AS_URL + '?action=verifyPin&pin=' + encodeURIComponent(saisi) + '&callback=' + cbName;
-    s.onerror = function(){ clearTimeout(timer); delete window[cbName]; _onError('Erreur réseau'); };
-    document.head.appendChild(s);
-    setTimeout(function(){ try{ s.remove(); }catch(e){} }, 95000);
+
+  async function _soumettre() {
+    if (encours) return;
+    var code = inputEl.value.trim();
+    if (code.length < 4) return;
+    erreurEl.textContent = '';
+    // 1) code bêta : vérifié ici, sans réseau
+    if (sha256('RA2026|' + code.toUpperCase()) === HASH_BETA) { _ok('beta'); return; }
+    // 2) code complet : vérifié par Apps Script, avec relances rapides si Google ne répond pas
+    encours = true; _setLoading(true);
+    var T = [20000, 30000, 30000, 40000], data = null, derniere = null;
+    for (var i = 0; i < T.length; i++) {
+      if (i > 0) chargEl.textContent = 'Vérification… (nouvel essai ' + (i + 1) + '/' + T.length + ')';
+      try { data = await _verifServeur(code, T[i]); break; }
+      catch (e) { derniere = e; if (i < T.length - 1) await new Promise(function (r) { setTimeout(r, 1000); }); }
+    }
+    encours = false; _setLoading(false); chargEl.textContent = 'Vérification…';
+    if (!data) { erreurEl.textContent = 'Réseau trop lent — réessayez dans quelques secondes'; return; }
+    if (data.ok) _ok('full');
+    else { erreurEl.textContent = 'Code incorrect. Réessayez.'; _shake(); inputEl.value = ''; validerBtn.disabled = true; }
   }
-  function _onError(msg){ _setLoading(false); erreurEl.textContent=msg; saisi=''; _maj(); }
-  function _cacher()    { if (overlay) overlay.style.display='none'; }
-  function _setLoading(on){ chargEl.hidden=!on; padEl.querySelectorAll('.pin-key').forEach(function(b){ b.disabled=on; }); }
-  function _shake()     { var c=document.getElementById('pin-card'); c.classList.remove('pin-shake'); void c.offsetWidth; c.classList.add('pin-shake'); }
+  function _ok(niveau) {
+    sessionStorage.setItem(SESSION_KEY, '1'); sessionStorage.setItem(NIVEAU_KEY, niveau);
+    _cacher();
+    try { document.dispatchEvent(new Event('ra-niveau')); } catch (e) {}
+  }
+  function _cacher()    { if (overlay) overlay.style.display = 'none'; }
+  function _setLoading(on) { chargEl.hidden = !on; validerBtn.disabled = on || inputEl.value.trim().length < 4; inputEl.disabled = on; }
+  function _shake()     { var c = document.getElementById('pin-card'); c.classList.remove('pin-shake'); void c.offsetWidth; c.classList.add('pin-shake'); }
 })();
 </script>
 
@@ -341,6 +376,7 @@
   <div class="login-subtitle">Ma fiche point signaleur</div>
 
   <div class="login-card">
+    <div id="betaBandeau">VERSION BÊTA — Tous Secteurs · Samedi 10/10</div>
 
     <!-- Étape 1 : Secteur -->
     <div class="input-group">
@@ -446,13 +482,13 @@ const JOURS = [
 const COURSES = {};
 
 // ── JSONP ─────────────────────────────────────────────────────────────────────
-function callAS(params) {
+function callAS(params, timeoutMs = 90000, rapide = false) {
   return new Promise((resolve, reject) => {
     const cbName = 'cb_' + Math.random().toString(36).slice(2);
     const timer  = setTimeout(() => {
-      delete window[cbName];
+      window[cbName] = () => { delete window[cbName]; };   // réponse tardive ignorée
       reject(new Error('Timeout — connexion trop lente'));
-    }, 90000); // 90s cold start Apps Script
+    }, timeoutMs);
     window[cbName] = data => {
       clearTimeout(timer);
       delete window[cbName];
@@ -460,22 +496,32 @@ function callAS(params) {
     };
     const s = document.createElement('script');
     s.src = APPS_SCRIPT_URL + '?' + new URLSearchParams({ ...params, callback: cbName });
-    s.onerror = () => { console.warn('JSONP onerror (redirect 302 probable) — on attend le timeout'); };
+    s.onerror = () => {
+      if (!rapide) { console.warn('JSONP onerror — on attend le timeout'); return; }
+      clearTimeout(timer);
+      window[cbName] = () => { delete window[cbName]; };
+      reject(new Error('Réponse non livrée par Google'));
+    };
     document.head.appendChild(s);
-    setTimeout(() => { try { s.remove(); } catch(e){} }, 95000);
+    setTimeout(() => { try { s.remove(); } catch(e){} }, timeoutMs + 5000);
   });
 }
 
-// Retry automatique — 2 tentatives max
-async function callASRetry(params, maxRetries = 2) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+// Lecture : une réponse non livrée par Google relance aussitôt (la lecture ne modifie rien).
+// 5 essais : 18, 20, 25, 30 puis 45 s.
+const LIRE_TIMEOUTS = [18000, 20000, 25000, 30000, 45000];
+async function callASRetry(params) {
+  let derniere;
+  for (let i = 0; i < LIRE_TIMEOUTS.length; i++) {
     try {
-      return await callAS(params);
+      return await callAS(params, LIRE_TIMEOUTS[i], true);
     } catch(e) {
-      if (attempt === maxRetries) throw e;
-      console.warn(`Tentative ${attempt} échouée, retry…`, e.message);
+      derniere = e;
+      console.warn('Lecture ' + params.action + ' : essai ' + (i + 1) + '/' + LIRE_TIMEOUTS.length + ' sans réponse', e.message);
+      if (i < LIRE_TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 1000));
     }
   }
+  throw derniere;
 }
 
 // ── État ──────────────────────────────────────────────────────────────────────
@@ -483,8 +529,22 @@ let JOUR_COURANT = 'J1';
 let SOURCE       = 'ts'; // 'ts' | 'lg'
 let MODE         = 'ps'; // 'ps' | 'nom' (TS uniquement)
 
+// ── Mode bêta (code bêta) : Tous Secteurs, J4 uniquement ─────────────────────
+const JOUR_BETA = 'J4';
+function estBeta() { try { return sessionStorage.getItem('ficheNiveau') === 'beta'; } catch(e) { return false; } }
+function appliquerNiveau() {
+  if (!estBeta()) return;
+  document.getElementById('btnLG').disabled = true;
+  document.querySelectorAll('.jour-btn').forEach(b => { if (b.dataset.jour !== JOUR_BETA) b.disabled = true; });
+  const bd = document.getElementById('betaBandeau');
+  if (bd) bd.style.display = 'block';
+  setSource('ts'); setMode(MODE); selectJour(JOUR_BETA);
+}
+document.addEventListener('ra-niveau', appliquerNiveau);
+
 // ── UI Login ──────────────────────────────────────────────────────────────────
 function setSource(src) {
+  if (estBeta() && src !== 'ts') return;
   SOURCE = src;
   document.getElementById('btnTS').className = 'source-btn' + (src === 'ts' ? ' active-ts' : '');
   document.getElementById('btnLG').className = 'source-btn' + (src === 'lg' ? ' active-lg' : '');
@@ -503,6 +563,7 @@ function setMode(mode) {
 }
 
 function selectJour(jid) {
+  if (estBeta() && jid !== JOUR_BETA) return;
   JOUR_COURANT = jid;
   document.querySelectorAll('.jour-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.jour === jid)
@@ -525,14 +586,19 @@ function retourChoix() {
   document.getElementById('screenLogin').style.display = 'flex';
 }
 
-// Init : TS + PS + J1 par défaut
+// Init : TS + PS + J1 par défaut (mode bêta : J4, appliqué ci-dessous)
 setSource('ts');
 setMode('ps');
 selectJour('J1');
+appliquerNiveau();
 document.addEventListener('keydown', e => { if (e.key === 'Enter') acceder(); });
 
 // ── Accéder — dispatcher ──────────────────────────────────────────────────────
 async function acceder() {
+  if (estBeta() && (SOURCE !== 'ts' || JOUR_COURANT !== JOUR_BETA)) {
+    document.getElementById('errMsg').textContent = 'Accès non ouvert dans cette version bêta';
+    return;
+  }
   if (SOURCE === 'ts' && MODE === 'nom') {
     await accederParNom();
   } else {
@@ -607,7 +673,8 @@ async function accederParNom() {
     const json = await callASRetry({ action:'getFicheParNom', nom, jour:JOUR_COURANT, source:'ts' });
     if (!json.ok) throw new Error(json.error || 'Erreur inconnue');
 
-    const results = (json.data && json.data.results) || [];
+    let results = (json.data && json.data.results) || [];
+    if (estBeta()) results = results.filter(r => r.source !== 'lg');
     if (!results.length) {
       errEl.textContent = `"${nom}" non trouvé en ${JOUR_COURANT} — Tous Secteurs`;
       return;
@@ -677,6 +744,12 @@ function afficherChoix(results, intro) {
 
 // ── Affichage fiche ───────────────────────────────────────────────────────────
 function afficherFiche(psNum, jourId, d) {
+  if (estBeta() && (d.secteur === 'LA_GAILLARDE' || jourId !== JOUR_BETA)) {
+    document.getElementById('screenLogin').style.display = 'flex';
+    document.getElementById('screenChoix').style.display = 'none';
+    document.getElementById('errMsg').textContent = 'Accès non ouvert dans cette version bêta';
+    return;
+  }
   const jour  = JOURS.find(j => j.id === jourId);
   const isLG  = (d.secteur === 'LA_GAILLARDE');
   const benvs = Array.isArray(d.benevoles) ? d.benevoles : [];
@@ -687,7 +760,7 @@ function afficherFiche(psNum, jourId, d) {
   const mBis = String(d.ps || '').match(/^(\d+\s*BIS)\s*[-–]\s*(.*)$/i);   // « 30 BIS - Dessus Banc »
   document.getElementById('fichePSTitre').innerHTML =
     `PS <span style="color:var(--rouge-vif)">${mBis ? mBis[1].toUpperCase() : psNum}</span>` +
-    ` — ${mBis ? mBis[2] : (d.ps || '').replace(/^\d+\s*[-–]\s*/, '')}` +
+    ` — ${mBis ? mBis[2] : String(d.ps == null ? '' : d.ps).replace(/^\d+\s*[-–]\s*/, '')}` +
     `<span class="secteur-badge ${isLG ? 'lg' : 'ts'}">${isLG ? 'LA_GAILLARDE' : d.secteur}</span>`;
 
   // Courses depuis la réponse : le serveur a déjà gardé uniquement celles qui passent par CE PS (PS_CONCERNES).
@@ -767,7 +840,7 @@ function afficherFiche(psNum, jourId, d) {
   const kmR = d.kmRavit || ''; const kmA = d.kmAtelier || '';
   // Distance numérique → « 10 km » ; texte libre (ex. « Au dessus du S40 ») → affiché tel quel, sans « km »
   const fmtKm = v => /^[\d\s.,]+$/.test(String(v)) ? v + ' km' : String(v);
-  const premierPart = d.premierPart || '';
+  const premierPart = d.premierPart == null ? '' : String(d.premierPart);
   body.insertAdjacentHTML('beforeend', `
     <div class="fiche-card">
       <div class="fiche-card-header"><span class="card-icon">🏁</span><span class="card-title">Courses & Distances</span></div>
@@ -790,11 +863,13 @@ function afficherFiche(psNum, jourId, d) {
   if (!isLG && d.coequipiers && d.coequipiers.length) {
     const equip = d.coequipiers.map(eq =>
       (eq.benevoles||[]).map(b => {
-        const ini = b.replace('Bénévole_','B').slice(0,4);
-        const psL = (eq.ps||'').match(/^(\S+)/)?.[1] || eq.ps;
+        const bTxt = String(b == null ? '' : b);
+        const ini = bTxt.replace('Bénévole_','B').slice(0,4);
+        const psTxt = String(eq.ps == null ? '' : eq.ps);
+        const psL = psTxt.match(/^(\S+)/)?.[1] || psTxt;
         return `<div class="equipe-item">
           <div class="equipe-avatar">${ini}</div>
-          <span class="equipe-nom">${b}</span>
+          <span class="equipe-nom">${bTxt}</span>
           <span class="equipe-ps">PS ${psL}</span>
         </div>`;
       }).join('')
@@ -819,7 +894,7 @@ function afficherFiche(psNum, jourId, d) {
   }
 
   // ── Card 8 : Observation ─────────────────────────────────────────────────
-  const obs = (d.obs||'').trim();
+  const obs = String(d.obs == null ? '' : d.obs).trim();
   if (obs && !obs.toLowerCase().includes('déposé')) {
     body.insertAdjacentHTML('beforeend', `
       <div class="fiche-card">
@@ -855,4 +930,3 @@ function row(label, val, rawHtml) {
 </script>
 </body>
 </html>
-
