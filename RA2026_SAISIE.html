@@ -3906,122 +3906,203 @@ async function callASLire(params) {
   throw derniere;
 }
 
+// ── Cache navigateur des référentiels (par jour) ─────────────────────────────
+// But : si Google ne livre pas la réponse (lenteur constatée le 08/10), la page s'ouvre aussitôt avec les
+// dernières listes connues de ce jour, puis les met à jour en arrière-plan. Les listes ne sont JAMAIS inventées :
+// seulement celles reçues de Sheets lors d'un chargement précédent sur ce navigateur.
+const REF_CACHE_PREFIX = 'ra2026_ref_';
+function refCacheLire(jour) {
+  try {
+    const o = JSON.parse(localStorage.getItem(REF_CACHE_PREFIX + jour) || 'null');
+    if (o && o.d && Array.isArray(o.d.benevoles) && Array.isArray(o.d.secteurs) && Array.isArray(o.d.vehicules)) return o;
+  } catch(_) {}
+  return null;
+}
+function refCacheEcrire(jour, d) {
+  try { localStorage.setItem(REF_CACHE_PREFIX + jour, JSON.stringify({ t: Date.now(), d })); } catch(_) {}
+}
+function refHeure(t) { const x = new Date(t); return String(x.getHours()).padStart(2,'0') + 'h' + String(x.getMinutes()).padStart(2,'0'); }
+
+// Applique un jeu de référentiels (reçu de Sheets ou lu dans le cache navigateur) aux listes de la page.
+// Lève une erreur AVANT de modifier les listes Secteurs/Véhicules si elles sont vides.
+function appliquerReferentiels(d) {
+  // ── Mise à jour des listes dynamiques ──────────────────────────────────
+  // BENEVOLES      : tableau des NOM seuls  → valeur sauvegardée dans Sheets
+  // BENEVOLES_DATA : tableau {nom, label, tel}
+  //   - nom   = NOM seul  (ex: "Bénévole_003")    → stockage BENEVOLE_x
+  //   - label = NOM+PRENOM (ex: "Bénévole_003 Corinne") → affichage <option>
+  // BENEVOLES_LABEL : Map NOM seul → label complet  → utilisé dans renderPSRow
+  BENEVOLES.length = 0;
+  BENEVOLES_DATA.length = 0;
+  if (!window.BENEVOLES_LABEL) window.BENEVOLES_LABEL = {};
+  // Vider avant rechargement
+  Object.keys(BENEVOLES_LABEL).forEach(k => delete BENEVOLES_LABEL[k]);
+
+  d.benevoles.forEach(b => {
+    const nomSeul = b.nomSeul || b.nom.split(' ')[0]; // NOM seul (fallback si nomSeul absent)
+    const label   = b.nom;                             // NOM+PRENOM (affichage)
+    BENEVOLES.push(nomSeul);
+    BENEVOLES_DATA.push({ nom: nomSeul, label, tel: b.tel || '' });
+    BENEVOLES_LABEL[nomSeul] = label;
+    BENEVOLES_LABEL_CUMUL[nomSeul] = label;
+  });
+  // Liste complète (tous bénévoles, quel que soit le jour) fournie par le serveur depuis la v23
+  if (d.labelsTous && typeof d.labelsTous === 'object') {
+    Object.keys(d.labelsTous).forEach(k => { if (d.labelsTous[k]) BENEVOLES_LABEL_CUMUL[k] = d.labelsTous[k]; });
+  }
+
+  // ── Secteurs et véhicules : source de vérité = Sheets (REF_Secteurs / REF_Vehicules)
+  // Nettoyage : texte, trim, lignes vides ignorées, doublons supprimés, ordre du Sheet conservé.
+  // Les deux listes sont validées AVANT d'écraser quoi que ce soit.
+  const nettoyer = (arr) => {
+    const seen = new Set(), out = [];
+    (arr || []).forEach(x => {
+      const v = String(x && typeof x === 'object' ? x.nom : x).trim();
+      if (v && v !== 'undefined' && v !== 'null' && !seen.has(v)) { seen.add(v); out.push(v); }
+    });
+    return out;
+  };
+  const listeSect = nettoyer(d.secteurs);
+  const listeVeh  = nettoyer(d.vehicules);
+  if (!listeSect.length) throw new Error('REF_Secteurs vide ou illisible');
+  if (!listeVeh.length)  throw new Error('REF_Vehicules vide ou illisible');
+  SECTEURS.length = 0;  listeSect.forEach(v => SECTEURS.push(v));
+  // Activation par jour (colonnes J1–J5 de REF_Secteurs) : null = actif tous les jours
+  Object.keys(SECTEURS_JOURS).forEach(k => delete SECTEURS_JOURS[k]);
+  (d.secteurs || []).forEach(x => {
+    if (x && typeof x === 'object') SECTEURS_JOURS[String(x.nom).trim()] = Array.isArray(x.jours) ? x.jours : null;
+  });
+  VEHICULES.length = 0; listeVeh.forEach(v => VEHICULES.push(v));
+
+  // Référants : depuis REF_Referents (d.referants) si disponible, sinon depuis secteurs
+  REFERANTS.length = 0;
+  if (d.referants && d.referants.length) {
+    d.referants.forEach(r => REFERANTS.push({ nom: r.nom, tel: r.tel || '' }));
+  } else if (d.secteurs && d.secteurs.length) {
+    const seen = new Set();
+    d.secteurs.forEach(s => {
+      if (s.referant && !seen.has(s.referant)) {
+        seen.add(s.referant);
+        REFERANTS.push({ nom: s.referant, tel: s.tel || '' });
+      }
+    });
+  }
+
+  if (d.ps && d.ps.length) {
+    // Sauvegarder LA_GAILLARDE avant effacement (peut ne pas être dans REF_PS)
+    const glrdPS = PS_SECTEUR['LA_GAILLARDE'] ? [...PS_SECTEUR['LA_GAILLARDE']] : [];
+    Object.keys(PS_SECTEUR).forEach(k => delete PS_SECTEUR[k]);
+    PS_TOUS.length = 0;
+    const deja = new Set();
+    d.ps.forEach(p => {
+      // p.label est fourni par l'Apps Script (« N° - Nom », ou « N° » si le PS n'a pas encore de nom)
+      const label = p.label || `${p.num} - ${p.lieudit}`;
+      if (p.secteur) {
+        if (!PS_SECTEUR[p.secteur]) PS_SECTEUR[p.secteur] = [];
+        // LA_GAILLARDE : liste reprise telle quelle (aucun dédoublonnage) ; autres secteurs : doublons exacts ignorés
+        if (p.secteur === 'LA_GAILLARDE' || !PS_SECTEUR[p.secteur].includes(label)) PS_SECTEUR[p.secteur].push(label);
+      }
+      // « Autres PS » : tous les PS du jour sauf LA_GAILLARDE et les n° 30 à 41 (réservés au module LG)
+      if (normCle(p.secteur) !== 'LA_GAILLARDE' && !estPSLG(label) && !deja.has(label)) {
+        deja.add(label);
+        PS_TOUS.push({ label, secteur: normTxt(p.secteur) });
+      }
+    });
+    PS_TOUS.sort((a, b) => ((parsePS(a.label)[0] || {}).n || 0) - ((parsePS(b.label)[0] || {}).n || 0) || a.label.localeCompare(b.label, 'fr'));
+    // Restaurer LA_GAILLARDE si non fournie par Sheets
+    if (!PS_SECTEUR['LA_GAILLARDE'] && glrdPS.length) {
+      PS_SECTEUR['LA_GAILLARDE'] = glrdPS;
+    }
+  }
+  if (d.courses && d.courses.length) {
+    Object.keys(COURSES).forEach(k => delete COURSES[k]);
+    d.courses.forEach(c => {
+      COURSES[c.nom] = { jours: c.jours, ps: c.ps, couleur: c.couleur };
+    });
+  }
+
+  // Mettre à jour RADIO_MAX depuis la config Sheets
+  if (d.config) {
+    if (d.config.MAX_COM) RADIO_MAX.com = d.config.MAX_COM;
+    if (d.config.MAX_CRS) RADIO_MAX.crs = d.config.MAX_CRS;
+    if (d.config.MAX_CMV) RADIO_MAX.cmv = d.config.MAX_CMV;
+  } else if (d.radioMax) {
+    // Fallback ancien format
+    if (d.radioMax.com) RADIO_MAX.com = d.radioMax.com;
+    if (d.radioMax.crs) RADIO_MAX.crs = d.radioMax.crs;
+    if (d.radioMax.cmv) RADIO_MAX.cmv = d.radioMax.cmv;
+  }
+
+}
+
+// Pastille discrète (n'empêche pas la saisie) pendant la mise à jour en arrière-plan des listes
+function refMajAfficher(msg) {
+  let el = document.getElementById('refMajBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'refMajBanner';
+    el.style.cssText = `position:fixed;left:8px;bottom:8px;z-index:450;max-width:92vw;
+      background:rgba(15,52,96,0.95);color:#fff;padding:6px 12px;border-radius:6px;
+      font-family:'Barlow Condensed',sans-serif;font-size:14px;letter-spacing:.5px;
+      border:1px solid #C0392B;pointer-events:none;`;
+    document.body.appendChild(el);
+  }
+  el.textContent = '⏳ ' + msg;
+  el.style.display = 'block';
+}
+function refMajMasquer() {
+  const el = document.getElementById('refMajBanner');
+  if (el) el.style.display = 'none';
+}
+
+// Mise à jour en arrière-plan quand la page est déjà ouverte avec les listes du cache.
+async function rafraichirReferentiels(jour, ancien) {
+  try {
+    const json = await callASLire({ action: 'getReferentiels', jour });
+    if (!json.ok) throw new Error(json.error);
+    refCacheEcrire(jour, json.data);
+    if (currentJour !== jour) return; // changement de jour entre-temps : le cache est à jour pour la prochaine fois
+    if (JSON.stringify(json.data) === ancien) {
+      refJourCharge = jour; refMajMasquer(); toast('Listes à jour ✓');
+      return;
+    }
+    appliquerReferentiels(json.data);
+    refJourCharge = jour;
+    refMajMasquer(); renderAll();
+    toast('Listes mises à jour depuis Google Sheets ✓');
+  } catch(e) {
+    refMajMasquer();
+    console.warn('Mise à jour des listes impossible :', e);
+    toast('Google ne répond pas — listes en mémoire conservées (la saisie reste possible)', 'warn');
+  }
+}
+
 // Charge les référentiels depuis Sheets au démarrage
 async function loadReferentiels() {
   if (!SHEETS_ENABLED) return;
+  const jourChargement = currentJour;
+  // 1) Listes déjà connues de ce jour sur ce navigateur : affichage immédiat, mise à jour derrière
+  const memo = refCacheLire(jourChargement);
+  if (memo) {
+    try {
+      appliquerReferentiels(memo.d);
+      refJourCharge = null; // listes pas encore confirmées par Sheets : les modules LG / Vérificateur relisent Sheets comme avant
+      hideRefError();
+      renderAll();
+      refMajAfficher('Listes du ' + refHeure(memo.t) + ' affichées — mise à jour depuis Google Sheets en cours…');
+      rafraichirReferentiels(jourChargement, JSON.stringify(memo.d)); // volontairement non attendu
+      return;
+    } catch(e) {
+      console.warn('Cache navigateur des listes inutilisable :', e);
+    }
+  }
+  // 2) Pas de cache pour ce jour : chargement normal depuis Sheets
   try {
     showLoadingBanner('Chargement des référentiels depuis Google Sheets…');
-    const jourChargement = currentJour;
     const json = await callASLire({ action: 'getReferentiels', jour: jourChargement });
     if (!json.ok) throw new Error(json.error);
-    const d = json.data;
-
-    // ── Mise à jour des listes dynamiques ──────────────────────────────────
-    // BENEVOLES      : tableau des NOM seuls  → valeur sauvegardée dans Sheets
-    // BENEVOLES_DATA : tableau {nom, label, tel}
-    //   - nom   = NOM seul  (ex: "Bénévole_003")    → stockage BENEVOLE_x
-    //   - label = NOM+PRENOM (ex: "Bénévole_003 Corinne") → affichage <option>
-    // BENEVOLES_LABEL : Map NOM seul → label complet  → utilisé dans renderPSRow
-    BENEVOLES.length = 0;
-    BENEVOLES_DATA.length = 0;
-    if (!window.BENEVOLES_LABEL) window.BENEVOLES_LABEL = {};
-    // Vider avant rechargement
-    Object.keys(BENEVOLES_LABEL).forEach(k => delete BENEVOLES_LABEL[k]);
-
-    d.benevoles.forEach(b => {
-      const nomSeul = b.nomSeul || b.nom.split(' ')[0]; // NOM seul (fallback si nomSeul absent)
-      const label   = b.nom;                             // NOM+PRENOM (affichage)
-      BENEVOLES.push(nomSeul);
-      BENEVOLES_DATA.push({ nom: nomSeul, label, tel: b.tel || '' });
-      BENEVOLES_LABEL[nomSeul] = label;
-      BENEVOLES_LABEL_CUMUL[nomSeul] = label;
-    });
-    // Liste complète (tous bénévoles, quel que soit le jour) fournie par le serveur depuis la v23
-    if (d.labelsTous && typeof d.labelsTous === 'object') {
-      Object.keys(d.labelsTous).forEach(k => { if (d.labelsTous[k]) BENEVOLES_LABEL_CUMUL[k] = d.labelsTous[k]; });
-    }
-
-    // ── Secteurs et véhicules : source de vérité = Sheets (REF_Secteurs / REF_Vehicules)
-    // Nettoyage : texte, trim, lignes vides ignorées, doublons supprimés, ordre du Sheet conservé.
-    // Les deux listes sont validées AVANT d'écraser quoi que ce soit.
-    const nettoyer = (arr) => {
-      const seen = new Set(), out = [];
-      (arr || []).forEach(x => {
-        const v = String(x && typeof x === 'object' ? x.nom : x).trim();
-        if (v && v !== 'undefined' && v !== 'null' && !seen.has(v)) { seen.add(v); out.push(v); }
-      });
-      return out;
-    };
-    const listeSect = nettoyer(d.secteurs);
-    const listeVeh  = nettoyer(d.vehicules);
-    if (!listeSect.length) throw new Error('REF_Secteurs vide ou illisible');
-    if (!listeVeh.length)  throw new Error('REF_Vehicules vide ou illisible');
-    SECTEURS.length = 0;  listeSect.forEach(v => SECTEURS.push(v));
-    // Activation par jour (colonnes J1–J5 de REF_Secteurs) : null = actif tous les jours
-    Object.keys(SECTEURS_JOURS).forEach(k => delete SECTEURS_JOURS[k]);
-    (d.secteurs || []).forEach(x => {
-      if (x && typeof x === 'object') SECTEURS_JOURS[String(x.nom).trim()] = Array.isArray(x.jours) ? x.jours : null;
-    });
-    VEHICULES.length = 0; listeVeh.forEach(v => VEHICULES.push(v));
-
-    // Référants : depuis REF_Referents (d.referants) si disponible, sinon depuis secteurs
-    REFERANTS.length = 0;
-    if (d.referants && d.referants.length) {
-      d.referants.forEach(r => REFERANTS.push({ nom: r.nom, tel: r.tel || '' }));
-    } else if (d.secteurs && d.secteurs.length) {
-      const seen = new Set();
-      d.secteurs.forEach(s => {
-        if (s.referant && !seen.has(s.referant)) {
-          seen.add(s.referant);
-          REFERANTS.push({ nom: s.referant, tel: s.tel || '' });
-        }
-      });
-    }
-
-    if (d.ps && d.ps.length) {
-      // Sauvegarder LA_GAILLARDE avant effacement (peut ne pas être dans REF_PS)
-      const glrdPS = PS_SECTEUR['LA_GAILLARDE'] ? [...PS_SECTEUR['LA_GAILLARDE']] : [];
-      Object.keys(PS_SECTEUR).forEach(k => delete PS_SECTEUR[k]);
-      PS_TOUS.length = 0;
-      const deja = new Set();
-      d.ps.forEach(p => {
-        // p.label est fourni par l'Apps Script (« N° - Nom », ou « N° » si le PS n'a pas encore de nom)
-        const label = p.label || `${p.num} - ${p.lieudit}`;
-        if (p.secteur) {
-          if (!PS_SECTEUR[p.secteur]) PS_SECTEUR[p.secteur] = [];
-          // LA_GAILLARDE : liste reprise telle quelle (aucun dédoublonnage) ; autres secteurs : doublons exacts ignorés
-          if (p.secteur === 'LA_GAILLARDE' || !PS_SECTEUR[p.secteur].includes(label)) PS_SECTEUR[p.secteur].push(label);
-        }
-        // « Autres PS » : tous les PS du jour sauf LA_GAILLARDE et les n° 30 à 41 (réservés au module LG)
-        if (normCle(p.secteur) !== 'LA_GAILLARDE' && !estPSLG(label) && !deja.has(label)) {
-          deja.add(label);
-          PS_TOUS.push({ label, secteur: normTxt(p.secteur) });
-        }
-      });
-      PS_TOUS.sort((a, b) => ((parsePS(a.label)[0] || {}).n || 0) - ((parsePS(b.label)[0] || {}).n || 0) || a.label.localeCompare(b.label, 'fr'));
-      // Restaurer LA_GAILLARDE si non fournie par Sheets
-      if (!PS_SECTEUR['LA_GAILLARDE'] && glrdPS.length) {
-        PS_SECTEUR['LA_GAILLARDE'] = glrdPS;
-      }
-    }
-    if (d.courses && d.courses.length) {
-      Object.keys(COURSES).forEach(k => delete COURSES[k]);
-      d.courses.forEach(c => {
-        COURSES[c.nom] = { jours: c.jours, ps: c.ps, couleur: c.couleur };
-      });
-    }
-
-    // Mettre à jour RADIO_MAX depuis la config Sheets
-    if (d.config) {
-      if (d.config.MAX_COM) RADIO_MAX.com = d.config.MAX_COM;
-      if (d.config.MAX_CRS) RADIO_MAX.crs = d.config.MAX_CRS;
-      if (d.config.MAX_CMV) RADIO_MAX.cmv = d.config.MAX_CMV;
-    } else if (d.radioMax) {
-      // Fallback ancien format
-      if (d.radioMax.com) RADIO_MAX.com = d.radioMax.com;
-      if (d.radioMax.crs) RADIO_MAX.crs = d.radioMax.crs;
-      if (d.radioMax.cmv) RADIO_MAX.cmv = d.radioMax.cmv;
-    }
+    appliquerReferentiels(json.data);
+    refCacheEcrire(jourChargement, json.data);
 
     refJourCharge = jourChargement;
     hideLoadingBanner();
