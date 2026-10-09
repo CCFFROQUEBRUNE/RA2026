@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROC D'AZUR 2027 — Maquette carte référent</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500;600&display=swap');
+  :root {
+    --rouge:#C0392B; --rouge-vif:#E74C3C; --orange:#E67E22; --dark:#0D1117; --dark2:#161B22; --dark3:#1C2333; --card:#1E2A3A;
+    --texte:#E6EDF3; --texte2:#8B949E; --vert:#27AE60; --bleu:#1F6FEB; --bleu-clair:#58A6FF; --jaune:#E3B341;
+    --border:rgba(255,255,255,.1);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--dark); color:var(--texte); font-family:'Barlow',Arial,sans-serif; font-size:15px; min-height:100vh; }
+  .maquette { background:repeating-linear-gradient(135deg,#7a5b00,#7a5b00 12px,#5c4500 12px,#5c4500 24px); color:#fff3c4; text-align:center;
+    font-family:'Barlow Condensed',sans-serif; font-weight:700; letter-spacing:1.5px; font-size:13px; padding:6px 10px; text-transform:uppercase; }
+  header { padding:14px 16px 10px; background:linear-gradient(135deg,var(--dark2),#1a0a08); border-bottom:3px solid var(--rouge); }
+  .evt { font-family:'Barlow Condensed',sans-serif; font-size:11px; font-weight:700; letter-spacing:2px; color:var(--rouge-vif); text-transform:uppercase; }
+  h1 { font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:900; line-height:1.1; }
+  h1 span { color:var(--rouge-vif); }
+  .sub { font-size:12px; color:var(--texte2); margin-top:2px; }
+  main { padding:12px 14px 24px; max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  label.lbl { font-family:'Barlow Condensed',sans-serif; font-size:12px; font-weight:700; letter-spacing:1.5px; color:var(--texte2); text-transform:uppercase; width:100%; }
+  select { background:var(--dark3); color:var(--texte); border:1px solid var(--border); border-radius:8px; padding:11px 12px; font-family:'Barlow Condensed',sans-serif;
+    font-size:18px; font-weight:700; letter-spacing:.5px; width:100%; }
+  .btn { background:rgba(255,255,255,.06); color:var(--texte); border:1.5px solid var(--border); border-radius:8px; padding:9px 12px; cursor:pointer;
+    font-family:'Barlow Condensed',sans-serif; font-size:15px; font-weight:700; letter-spacing:.5px; }
+  .btn.on { background:rgba(192,57,43,.22); border-color:var(--rouge-vif); color:#fff; }
+  .btn.action { background:var(--rouge); border-color:var(--rouge-vif); }
+  .btn:disabled { opacity:.5; }
+  .chip { display:inline-flex; align-items:center; gap:6px; }
+  .chip i { display:inline-block; width:14px; height:14px; border-radius:50%; border:2px solid #fff; }
+  .chip.off { opacity:.4; }
+  .info { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-wrap:wrap; gap:6px 18px; font-size:14px; }
+  .info b { font-family:'Barlow Condensed',sans-serif; font-size:17px; }
+  .info .tel { color:var(--jaune); }
+  #mapWrap { position:relative; }
+  #map { height:62vh; min-height:340px; border-radius:12px; border:1px solid var(--border); background:#222; }
+  #banniere { display:none; position:absolute; left:10px; right:10px; top:10px; z-index:1000; background:rgba(122,27,20,.95); color:#fff; border-radius:8px;
+    padding:8px 12px; font-size:13px; font-weight:600; }
+  .pt { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; border:3px solid #fff; color:#fff;
+    font-family:'Barlow Condensed',Arial,sans-serif; font-weight:900; font-size:13px; box-shadow:0 2px 6px rgba(0,0,0,.6); }
+  .pt.ps { background:#E74C3C; } .pt.atelier { background:#E67E22; } .pt.ravito { background:#27AE60; } .pt.secours { background:#1F6FEB; }
+  .pt.moi { background:#00B7FF; width:18px; height:18px; border-width:3px; }
+  .leaflet-popup-content { font-family:'Barlow',Arial,sans-serif; font-size:14px; color:#111; }
+  .leaflet-popup-content b { font-family:'Barlow Condensed',Arial,sans-serif; font-size:17px; }
+  #liste { display:flex; flex-direction:column; gap:6px; }
+  .li { display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:8px 12px; cursor:pointer; }
+  .li .pt { flex:0 0 auto; width:28px; height:28px; }
+  .li .nom { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:17px; line-height:1.15; }
+  .li .det { font-size:12px; color:var(--texte2); }
+  .li .dist { margin-left:auto; font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--bleu-clair); white-space:nowrap; }
+  .note { font-size:12px; color:var(--texte2); line-height:1.5; }
+  .note b { color:var(--texte); }
+  #impr { display:none; }
+
+  /* ===== IMPRESSION : A4 paysage, une carte + la liste des points ===== */
+  @page { size:A4 landscape; margin:8mm; }
+  @media print {
+    body { background:#fff; color:#000; }
+    .maquette { background:none; color:#7a5b00; border:1px solid #7a5b00; }
+    header { background:none; border-bottom:2px solid #000; padding:0 0 4px; }
+    h1, .sub, .evt { color:#000; } h1 span { color:#C0392B; }
+    .noprint, #controles, #liste, .note, #banniere { display:none !important; }
+    main { padding:0; gap:4px; max-width:none; }
+    .info { background:none; border:1px solid #000; color:#000; padding:4px 8px; border-radius:0; }
+    .info .tel { color:#000; }
+    #map { height:108mm; min-height:0; border:1px solid #000; border-radius:0; }
+    .leaflet-control-zoom { display:none !important; }
+    .maquette { padding:2px 6px; font-size:10px; }
+    #impr { display:block; color:#000; font-size:9.5px; }
+    #impr table { width:100%; border-collapse:collapse; }
+    #impr th, #impr td { border:1px solid #666; padding:1px 6px; text-align:left; }
+    #impr th { background:#ddd !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .pt { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  }
+</style>
+</head>
+<body>
+<div class="maquette">Maquette 2027 — données fictives — aucune connexion au Sheet ni à Apps Script</div>
+<header>
+  <div class="evt">🚵 ROC D'AZUR 2027 — fiche référent</div>
+  <h1>Carte de <span>mon secteur</span></h1>
+  <div class="sub">PS · ateliers · ravitaillements · postes de secours</div>
+</header>
+
+<main>
+  <div id="controles" class="row">
+    <label class="lbl" for="selSecteur">Secteur</label>
+    <select id="selSecteur"></select>
+    <label class="lbl" style="margin-top:6px">Fond de carte</label>
+    <button class="btn on" data-fond="sat">🛰 Satellite IGN</button>
+    <button class="btn" data-fond="plan">🗺 Plan IGN</button>
+    <button class="btn" data-fond="osm">OpenStreetMap</button>
+    <label class="lbl" style="margin-top:6px">Afficher</label>
+    <button class="btn on chip" data-type="ps"><i style="background:#E74C3C"></i>PS</button>
+    <button class="btn on chip" data-type="atelier"><i style="background:#E67E22"></i>Ateliers</button>
+    <button class="btn on chip" data-type="ravito"><i style="background:#27AE60"></i>Ravitaillements</button>
+    <button class="btn on chip" data-type="secours"><i style="background:#1F6FEB"></i>Secours</button>
+  </div>
+
+  <div class="info" id="info"></div>
+
+  <div id="mapWrap"><div id="map"></div><div id="banniere"></div></div>
+
+  <div class="row noprint">
+    <button class="btn" id="btnPos">📍 Ma position</button>
+    <button class="btn" id="btnCadre">⤢ Cadrer le secteur</button>
+    <button class="btn action" id="btnImpr">🖨 Imprimer la carte</button>
+  </div>
+
+  <div id="liste"></div>
+
+  <div id="impr"></div>
+
+  <p class="note"><b>À propos de cette maquette.</b> Tous les points, noms, numéros et coordonnées sont <b>inventés</b> (secteur fictif près de Roquebrune-sur-Argens).
+  Le fond de carte est chargé directement par le navigateur chez l'IGN (satellite ou plan) ou OpenStreetMap : ce fichier ne contient et ne stocke aucune donnée de l'organisation.
+  Sans réseau, le fond n'apparaît pas — la fiche papier reste la référence. © IGN · © les contributeurs OpenStreetMap.</p>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Données FICTIVES (en 2027 : lues depuis un onglet du Sheet, après vérification du code côté serveur) ──────────
+const SECTEURS = {
+  'DÉMO A — Les Colles': { referent:'Référent Démo A', tel:'06 00 00 00 01', mep:'6h30', centre:[43.4625, 6.6185], points:[
+    { t:'ps', n:'101', nom:'Carrefour de la Fontaine', lat:43.4668, lon:6.6141, mep:'7h15', km:'' },
+    { t:'ps', n:'102', nom:'Croix du Pin', lat:43.4651, lon:6.6178, mep:'7h15', km:'' },
+    { t:'ps', n:'103', nom:'Piste de la Source', lat:43.4630, lon:6.6226, mep:'7h30', km:'' },
+    { t:'ps', n:'104', nom:'Passage du Ravin', lat:43.4606, lon:6.6213, mep:'7h30', km:'' },
+    { t:'ps', n:'105', nom:'Col des Lauriers', lat:43.4583, lon:6.6169, mep:'7h45', km:'' },
+    { t:'atelier', n:'', nom:'Atelier mécanique A', lat:43.4641, lon:6.6197, mep:'7h00', km:'km 12,4' },
+    { t:'ravito', n:'', nom:'Ravitaillement A', lat:43.4617, lon:6.6149, mep:'7h00', km:'km 18,0' },
+    { t:'secours', n:'', nom:'Poste de secours (pompiers)', lat:43.4655, lon:6.6204, mep:'6h45', km:'' } ]},
+  'DÉMO B — Le Plateau': { referent:'Référent Démo B', tel:'06 00 00 00 02', mep:'7h00', centre:[43.4478, 6.6412], points:[
+    { t:'ps', n:'201', nom:'Entrée du plateau', lat:43.4512, lon:6.6381, mep:'7h30', km:'' },
+    { t:'ps', n:'202', nom:'Citerne', lat:43.4493, lon:6.6425, mep:'7h30', km:'' },
+    { t:'ps', n:'203', nom:'Virage des Chênes', lat:43.4471, lon:6.6459, mep:'7h45', km:'' },
+    { t:'ps', n:'204', nom:'Descente du Pas', lat:43.4448, lon:6.6431, mep:'7h45', km:'' },
+    { t:'ravito', n:'', nom:'Ravitaillement B', lat:43.4486, lon:6.6401, mep:'7h15', km:'km 24,6' },
+    { t:'secours', n:'', nom:'Poste de secours B', lat:43.4462, lon:6.6392, mep:'7h00', km:'' } ]},
+  'DÉMO C — Vallon Sud': { referent:'Référent Démo C', tel:'06 00 00 00 03', mep:'6h45', centre:[43.4392, 6.6072], points:[
+    { t:'ps', n:'301', nom:'Pont du Vallon', lat:43.4421, lon:6.6046, mep:'7h15', km:'' },
+    { t:'ps', n:'302', nom:'Gué', lat:43.4402, lon:6.6071, mep:'7h15', km:'' },
+    { t:'ps', n:'303', nom:'Remontée sèche', lat:43.4381, lon:6.6098, mep:'7h30', km:'' },
+    { t:'atelier', n:'', nom:'Atelier mécanique C', lat:43.4396, lon:6.6082, mep:'7h00', km:'km 33,2' } ]}
+};
+const TYPES = { ps:'Point signaleur', atelier:'Atelier', ravito:'Ravitaillement', secours:'Poste de secours' };
+const EMO   = { atelier:'🔧', ravito:'🍌', secours:'✚' };
+
+// ── Fonds de carte : chargés directement par le navigateur (rien n'est stocké chez nous) ─────────────────────────
+const geopf = (layer, fmt) => 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=' + layer +
+  '&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=' + fmt;
+const FONDS = {
+  sat:  L.tileLayer(geopf('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'),        { maxZoom:19, attribution:'© IGN — Géoplateforme' }),
+  plan: L.tileLayer(geopf('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), { maxZoom:18, attribution:'© IGN — Géoplateforme' }),
+  osm:  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',        { maxZoom:19, attribution:'© OpenStreetMap' })
+};
+let fondCourant = 'sat';
+const stats = { ok:0, err:0 };
+Object.values(FONDS).forEach(f => {
+  f.on('tileload', () => { stats.ok++; cacherBanniere(); });
+  f.on('tileerror', () => { stats.err++; if (stats.err >= 6 && stats.ok === 0) banniere('Fond de carte indisponible (réseau ?) — les points restent affichés. La fiche papier fait foi.'); });
+});
+function banniere(m) { const b = document.getElementById('banniere'); b.textContent = m; b.style.display = 'block'; }
+function cacherBanniere() { document.getElementById('banniere').style.display = 'none'; }
+
+const map = L.map('map', { zoomControl:true }).setView([43.455, 6.62], 14);
+FONDS.sat.addTo(map);
+const couche = L.layerGroup().addTo(map);
+let marqueurs = [], moiMarker = null, moiCercle = null, moiPos = null, watchId = null;
+const actifs = { ps:true, atelier:true, ravito:true, secours:true };
+
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function icone(p) {
+  const txt = p.t === 'ps' ? esc(p.n) : EMO[p.t];
+  return L.divIcon({ className:'', html:'<div class="pt ' + p.t + '">' + txt + '</div>', iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-14] });
+}
+function dist(a, b) {            // haversine, en mètres
+  const R = 6371000, r = x => x * Math.PI / 180, dLa = r(b[0]-a[0]), dLo = r(b[1]-a[1]);
+  const h = Math.sin(dLa/2)**2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(dLo/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const fmtD = m => m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1).replace('.', ',') + ' km';
+const libelle = p => (p.t === 'ps' ? 'PS ' + p.n + ' — ' : '') + p.nom;
+
+function secteurCourant() { return SECTEURS[document.getElementById('selSecteur').value]; }
+
+function afficher(cadrer) {
+  const nomS = document.getElementById('selSecteur').value, s = SECTEURS[nomS];
+  couche.clearLayers(); marqueurs = [];
+  const visibles = s.points.filter(p => actifs[p.t]);
+  visibles.forEach(p => {
+    const m = L.marker([p.lat, p.lon], { icon:icone(p), title:libelle(p) }).addTo(couche);
+    m.bindPopup('<b>' + esc(libelle(p)) + '</b><br>' + TYPES[p.t] +
+      (p.mep ? '<br>Mise en place : <b>' + esc(p.mep) + '</b>' : '') + (p.km ? '<br>' + esc(p.km) : '') +
+      '<br><a href="https://www.google.com/maps/search/?api=1&query=' + p.lat + ',' + p.lon + '" target="_blank" rel="noopener">Ouvrir dans mon appli cartes</a>');
+    marqueurs.push({ p, m });
+  });
+  document.getElementById('info').innerHTML =
+    '<span>Référent : <b>' + esc(s.referent) + '</b></span><span class="tel">📞 <b>' + esc(s.tel) + '</b></span>' +
+    '<span>H MeP secteur : <b>' + esc(s.mep) + '</b></span>' +
+    '<span>' + s.points.filter(p => p.t === 'ps').length + ' PS · ' + s.points.filter(p => p.t === 'atelier').length + ' atelier(s) · ' +
+    s.points.filter(p => p.t === 'ravito').length + ' ravito(s) · ' + s.points.filter(p => p.t === 'secours').length + ' secours</span>';
+  liste(visibles); imprTable(s, nomS);
+  if (cadrer !== false) cadrerSecteur();
+}
+function liste(visibles) {
+  const el = document.getElementById('liste');
+  const ordre = { ps:0, atelier:1, ravito:2, secours:3 };
+  const tri = visibles.slice().sort((a, b) => ordre[a.t] - ordre[b.t] || String(a.n).localeCompare(String(b.n), 'fr', { numeric:true }));
+  el.innerHTML = tri.map((p, i) => {
+    const d = moiPos ? '<span class="dist">' + fmtD(dist(moiPos, [p.lat, p.lon])) + '</span>' : '';
+    return '<div class="li" data-i="' + i + '"><div class="pt ' + p.t + '">' + (p.t === 'ps' ? esc(p.n) : EMO[p.t]) + '</div>' +
+      '<div><div class="nom">' + esc(libelle(p)) + '</div><div class="det">' + TYPES[p.t] + (p.mep ? ' · MeP ' + esc(p.mep) : '') + (p.km ? ' · ' + esc(p.km) : '') + '</div></div>' + d + '</div>';
+  }).join('') || '<div class="note">Aucun point affiché : active au moins un type ci-dessus.</div>';
+  el.querySelectorAll('.li').forEach((n, i) => n.addEventListener('click', () => {
+    const p = tri[i], mk = marqueurs.find(x => x.p === p);
+    if (mk) { map.setView([p.lat, p.lon], Math.max(map.getZoom(), 17)); mk.m.openPopup(); window.scrollTo({ top:document.getElementById('map').offsetTop - 10, behavior:'smooth' }); }
+  }));
+}
+function imprTable(s, nomS) {
+  const ordre = { ps:0, atelier:1, ravito:2, secours:3 };
+  const tri = s.points.slice().sort((a, b) => ordre[a.t] - ordre[b.t] || String(a.n).localeCompare(String(b.n), 'fr', { numeric:true }));
+  document.getElementById('impr').innerHTML = '<table><thead><tr><th>Point</th><th>Type</th><th>H MeP</th><th>Précisions</th><th>Latitude</th><th>Longitude</th></tr></thead><tbody>' +
+    tri.map(p => '<tr><td><b>' + esc(libelle(p)) + '</b></td><td>' + TYPES[p.t] + '</td><td>' + esc(p.mep) + '</td><td>' + esc(p.km) + '</td><td>' +
+      p.lat.toFixed(5) + '</td><td>' + p.lon.toFixed(5) + '</td></tr>').join('') + '</tbody></table>';
+}
+function cadrerSecteur() {
+  const pts = secteurCourant().points.filter(p => actifs[p.t]).map(p => [p.lat, p.lon]);
+  if (!pts.length) { map.setView(secteurCourant().centre, 15); return; }
+  map.fitBounds(L.latLngBounds(pts), { padding:[40, 40], maxZoom:17 });
+}
+
+// ── Interface ───────────────────────────────────────────────────────────────────────────────────────────────────
+const sel = document.getElementById('selSecteur');
+Object.keys(SECTEURS).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+sel.addEventListener('change', () => afficher(true));
+document.querySelectorAll('[data-fond]').forEach(b => b.addEventListener('click', () => {
+  map.removeLayer(FONDS[fondCourant]); fondCourant = b.dataset.fond; FONDS[fondCourant].addTo(map); FONDS[fondCourant].bringToBack();
+  stats.ok = 0; stats.err = 0; cacherBanniere();
+  document.querySelectorAll('[data-fond]').forEach(x => x.classList.toggle('on', x === b));
+}));
+document.querySelectorAll('[data-type]').forEach(b => b.addEventListener('click', () => {
+  actifs[b.dataset.type] = !actifs[b.dataset.type];
+  b.classList.toggle('on', actifs[b.dataset.type]); b.classList.toggle('off', !actifs[b.dataset.type]);
+  afficher(false);
+}));
+document.getElementById('btnCadre').addEventListener('click', cadrerSecteur);
+document.getElementById('btnImpr').addEventListener('click', () => window.print());
+window.addEventListener('beforeprint', () => { map.invalidateSize(); cadrerSecteur(); });
+window.addEventListener('afterprint', () => map.invalidateSize());
+
+document.getElementById('btnPos').addEventListener('click', () => {
+  const btn = document.getElementById('btnPos');
+  if (watchId !== null) {                         // 2e appui : on arrête le suivi
+    navigator.geolocation.clearWatch(watchId); watchId = null; btn.classList.remove('on');
+    if (moiMarker) { map.removeLayer(moiMarker); map.removeLayer(moiCercle); moiMarker = moiCercle = null; } moiPos = null; afficher(false); return;
+  }
+  if (!navigator.geolocation) { banniere('Position indisponible sur cet appareil.'); return; }
+  btn.classList.add('on');
+  watchId = navigator.geolocation.watchPosition(pos => {
+    moiPos = [pos.coords.latitude, pos.coords.longitude];
+    if (!moiMarker) {
+      moiCercle = L.circle(moiPos, { radius:pos.coords.accuracy, color:'#00B7FF', weight:1, fillOpacity:.12 }).addTo(map);
+      moiMarker = L.marker(moiPos, { icon:L.divIcon({ className:'', html:'<div class="pt moi"></div>', iconSize:[18,18], iconAnchor:[9,9] }), zIndexOffset:1000 }).addTo(map);
+    } else { moiMarker.setLatLng(moiPos); moiCercle.setLatLng(moiPos).setRadius(pos.coords.accuracy); }
+    liste(secteurCourant().points.filter(p => actifs[p.t]));
+  }, err => { banniere('Position refusée ou indisponible (' + err.message + ').'); btn.classList.remove('on'); watchId = null; },
+  { enableHighAccuracy:true, maximumAge:5000, timeout:20000 });
+});
+
+afficher(true);
+</script>
+</body>
+</html>
